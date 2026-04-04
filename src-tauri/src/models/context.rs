@@ -10,6 +10,9 @@ pub struct GroveContext {
     pub context_json: String,
     pub recent_memory: String,
     pub accumulated_insights: String,
+    pub semantic_facts: String,
+    pub tuning_hints: String,
+    pub plugin_data: String,
     pub local_time: String,
     pub day_of_week: String,
     pub date: String,
@@ -70,6 +73,63 @@ impl GroveContext {
                 .join("\n")
         };
 
+        // Semantic facts
+        let semantic_facts = if memory_data.facts.is_empty() {
+            String::new()
+        } else {
+            let facts: Vec<String> = memory_data
+                .facts
+                .iter()
+                .filter(|f| f.superseded_by.is_none() && f.confidence >= 0.5)
+                .take(30)
+                .map(|f| format!("- [{}] {} (confidence: {:.1})", f.category, f.content, f.confidence))
+                .collect();
+            if facts.is_empty() {
+                String::new()
+            } else {
+                format!("\n--- KNOWN FACTS ABOUT USER ---\n{}", facts.join("\n"))
+            }
+        };
+
+        // Self-tuning hints
+        let tuning_hints = {
+            let t = &memory_data.tuning;
+            if t.total_sessions == 0 {
+                String::new()
+            } else {
+                let mut hints = Vec::new();
+
+                // Find most/least engaged block types
+                let mut engagements: Vec<_> = t.block_type_engagement.iter().collect();
+                engagements.sort_by(|a, b| {
+                    let rate_a = if a.1.shown > 0 { a.1.interacted as f64 / a.1.shown as f64 } else { 0.0 };
+                    let rate_b = if b.1.shown > 0 { b.1.interacted as f64 / b.1.shown as f64 } else { 0.0 };
+                    rate_b.partial_cmp(&rate_a).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                if let Some((name, eng)) = engagements.first() {
+                    if eng.interacted > 0 {
+                        hints.push(format!("User engages most with: {}", name));
+                    }
+                }
+                if let Some((name, eng)) = engagements.last() {
+                    if eng.shown > 3 && eng.interacted == 0 {
+                        hints.push(format!("User rarely engages with: {} (shown {} times, never clicked)", name, eng.shown));
+                    }
+                }
+
+                if !t.preferred_session_times.is_empty() {
+                    hints.push(format!("User typically opens Grove during: {}", t.preferred_session_times.join(", ")));
+                }
+
+                if hints.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n--- SELF-TUNING OBSERVATIONS ---\n{}", hints.join("\n"))
+                }
+            }
+        };
+
         let last_seen = memory_data
             .last_seen
             .unwrap_or_else(|| "never — this is the first session".to_string());
@@ -81,6 +141,9 @@ impl GroveContext {
             context_json,
             recent_memory,
             accumulated_insights,
+            semantic_facts,
+            tuning_hints,
+            plugin_data: String::new(), // Filled by caller if plugins are active
             local_time: now.to_rfc3339(),
             day_of_week: now.format("%A").to_string(),
             date: now.format("%B %-d, %Y").to_string(),
@@ -107,7 +170,7 @@ Time since last session: {}
 
 --- ACCUMULATED INSIGHTS ---
 {}
-
+{}{}{}
 {}
 
 Decide what to show. Return JSON only."#,
@@ -119,6 +182,9 @@ Decide what to show. Return JSON only."#,
             self.context_json,
             self.recent_memory,
             self.accumulated_insights,
+            self.semantic_facts,
+            self.tuning_hints,
+            self.plugin_data,
             self.user_input
                 .as_ref()
                 .map(|i| format!("--- USER INPUT ---\n{}", i))

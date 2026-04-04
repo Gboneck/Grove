@@ -1,8 +1,10 @@
-pub mod reason;
-pub mod soul;
+pub mod actions;
 pub mod context;
-pub mod memory;
-pub mod system;
-pub mod setup;
+pub mod identity;
 pub mod logs;
+pub mod memory;
+pub mod reason;
+pub mod setup;
+pub mod soul;
+pub mod system;
 pub mod watch;

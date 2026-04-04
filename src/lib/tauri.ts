@@ -93,3 +93,73 @@ export interface FileStamps {
 export async function getFileStamps(): Promise<FileStamps> {
   return invoke<FileStamps>("get_file_stamps");
 }
+
+// Identity wizard
+export async function generateSoul(
+  name: string,
+  location: string | null,
+  role: string | null,
+  projects: string[],
+  priorities: string[],
+  workStyle: string | null
+): Promise<string> {
+  return invoke<string>("generate_soul", {
+    name,
+    location,
+    role,
+    projects,
+    priorities,
+    workStyle,
+  });
+}
+
+export async function isSoulPersonalized(): Promise<boolean> {
+  return invoke<boolean>("is_soul_personalized");
+}
+
+// Actions
+export interface ActionDef {
+  id: string;
+  label: string;
+  description: string;
+  executor: string;
+}
+
+export interface ActionResult {
+  success: boolean;
+  message: string;
+  output: string | null;
+}
+
+export async function executeAction(
+  actionId: string,
+  params?: Record<string, unknown>
+): Promise<ActionResult> {
+  return invoke<ActionResult>("execute_action", {
+    actionId,
+    params: params || null,
+  });
+}
+
+export async function listActions(): Promise<ActionDef[]> {
+  return invoke<ActionDef[]>("list_actions");
+}
+
+// Memory stats
+export interface MemoryStats {
+  total_sessions: number;
+  total_facts: number;
+  total_patterns: number;
+  total_insights: number;
+}
+
+export async function getMemoryStats(): Promise<MemoryStats> {
+  return invoke<MemoryStats>("get_memory_stats");
+}
+
+export async function recordActionEngagement(
+  blockType: string,
+  interacted: boolean
+): Promise<void> {
+  return invoke<void>("record_action_engagement", { blockType, interacted });
+}
