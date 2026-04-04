@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod autonomous;
 pub mod context;
 pub mod identity;
 pub mod logs;
@@ -6,7 +7,9 @@ pub mod mcp;
 pub mod memory;
 pub mod profiles;
 pub mod reason;
+pub mod reflection;
 pub mod setup;
 pub mod soul;
 pub mod system;
+pub mod ventures;
 pub mod watch;

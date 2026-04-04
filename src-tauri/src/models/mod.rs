@@ -74,6 +74,8 @@ pub struct ReasoningOutput {
     pub source: ModelSource,
     pub ambient_mood: Option<String>,
     pub ambient_theme: Option<String>,
+    pub auto_actions: Option<Vec<AutoAction>>,
+    pub venture_updates: Option<Vec<VentureUpdate>>,
 }
 
 /// Raw JSON shape returned by the reasoning models
@@ -92,6 +94,28 @@ pub struct RawReasoningResponse {
     pub insights: Option<Vec<String>>,
     #[serde(default)]
     pub ambient_state: Option<AmbientState>,
+    #[serde(default)]
+    pub auto_actions: Option<Vec<AutoAction>>,
+    #[serde(default)]
+    pub venture_updates: Option<Vec<VentureUpdate>>,
+}
+
+/// An action the model wants executed autonomously
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoAction {
+    pub action_type: String, // "note", "timer", "venture_status", "reminder", "file_write"
+    pub description: String,
+    #[serde(default)]
+    pub params: serde_json::Map<String, Value>,
+}
+
+/// A model-suggested change to a venture in context.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VentureUpdate {
+    pub venture_name: String,
+    pub field: String,       // "status", "health", "priority", "nextAction"
+    pub new_value: Value,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -120,6 +144,8 @@ impl RawReasoningResponse {
             source,
             ambient_mood: mood,
             ambient_theme: theme,
+            auto_actions: self.auto_actions,
+            venture_updates: self.venture_updates,
         }
     }
 }

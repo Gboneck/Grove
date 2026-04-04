@@ -12,6 +12,8 @@ import ProfilePanel from "./components/panels/ProfilePanel";
 import ContextEditor from "./components/panels/ContextEditor";
 import SearchPanel from "./components/panels/SearchPanel";
 import CommandPalette from "./components/CommandPalette";
+import ActionLog from "./components/ActionLog";
+import DigestPanel from "./components/panels/DigestPanel";
 import {
   reasonStream,
   checkSetup,
@@ -63,6 +65,9 @@ export default function App() {
   const [contextOpen, setContextOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [digestOpen, setDigestOpen] = useState(false);
+  const [autoActions, setAutoActions] = useState<string[]>([]);
+  const [ventureUpdates, setVentureUpdates] = useState<string[]>([]);
   const [hasPeriodicUpdate, setHasPeriodicUpdate] = useState(false);
   const lastStampsRef = useRef<FileStamps | null>(null);
 
@@ -116,6 +121,8 @@ export default function App() {
         setModelSource(response.model_source);
         setAmbientMood(response.ambient_mood);
         setThemeHint(response.theme_hint);
+        setAutoActions(response.auto_action_results || []);
+        setVentureUpdates(response.venture_update_results || []);
       } else {
         throw new Error("Invalid response structure");
       }
@@ -193,6 +200,7 @@ export default function App() {
     { id: "logs", label: "View Reasoning Logs", action: () => setLogsOpen(true) },
     { id: "plugins", label: "Manage Plugins", action: () => setPluginsOpen(true) },
     { id: "profiles", label: "Switch Profile", action: () => setProfilesOpen(true) },
+    { id: "digest", label: "Weekly Digest", action: () => setDigestOpen(true) },
   ];
 
   // Poll ~/.grove/ files for external changes every 10s
@@ -318,10 +326,18 @@ export default function App() {
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}
       />
+      <DigestPanel
+        isOpen={digestOpen}
+        onClose={() => setDigestOpen(false)}
+      />
       <CommandPalette
         isOpen={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         commands={paletteCommands}
+      />
+      <ActionLog
+        autoActions={autoActions}
+        ventureUpdates={ventureUpdates}
       />
     </>
   );

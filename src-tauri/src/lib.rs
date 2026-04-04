@@ -14,6 +14,7 @@ use commands::{
     mcp::{mcp_call_tool, mcp_list_tools},
     memory::{get_full_memory, get_memory, get_memory_stats, record_action_engagement},
     profiles::{create_profile, delete_profile, list_profiles, switch_profile},
+    reflection::{generate_and_save_digest, get_weekly_digest},
     reason::{
         clear_conversation, get_model_status, reason, reason_stream, set_model_mode,
         ConversationState, RouterState,
@@ -185,6 +186,8 @@ pub fn run() {
             delete_profile,
             mcp_list_tools,
             mcp_call_tool,
+            get_weekly_digest,
+            generate_and_save_digest,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -5,8 +5,11 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 
+use super::autonomous;
 use super::logs::{write_reasoning_log, LogEntry};
 use super::memory;
+use super::reflection;
+use super::ventures;
 use crate::commands::actions::PluginState;
 use crate::models::context::GroveContext;
 use crate::models::router::{ModelRouter, ModelStatus};
@@ -26,6 +29,10 @@ pub struct ReasonResponse {
     pub ambient_mood: Option<String>,
     pub theme_hint: Option<String>,
     pub conversation_id: String,
+    #[serde(default)]
+    pub auto_action_results: Vec<String>,
+    #[serde(default)]
+    pub venture_update_results: Vec<String>,
 }
 
 /// State managed by Tauri — holds the model router and conversation history
@@ -53,13 +60,21 @@ pub async fn reason(
     let mut context =
         GroveContext::gather(user_input.clone()).map_err(|e| format!("Context error: {}", e))?;
 
-    // Inject plugin data into context
+    // Inject plugin data, digest, and reminders into context
     {
         let registry = plugin_state.0.lock().await;
         let plugin_data = registry.gather_data_context();
         let actions_ctx = registry.actions_context();
-        if !plugin_data.is_empty() || !actions_ctx.is_empty() {
-            context.plugin_data = format!("{}{}", plugin_data, actions_ctx);
+        let digest_ctx = reflection::digest_context();
+        let reminders_ctx = reflection::reminders_context();
+        context.plugin_data = format!("{}{}{}{}", plugin_data, actions_ctx, digest_ctx, reminders_ctx);
+    }
+
+    // Generate weekly digest if needed (runs once per week)
+    if reflection::should_generate_digest() {
+        if let Ok(digest) = reflection::generate_weekly_digest() {
+            reflection::save_digest(&digest).ok();
+            eprintln!("[grove] Weekly digest generated for {}", digest.week_start);
         }
     }
 
@@ -169,13 +184,35 @@ pub async fn reason(
     };
     write_reasoning_log(&log_entry);
 
-    // 7. Extract ambient state
+    // 7. Execute autonomous actions from the model
+    let auto_action_results = if let Some(ref actions) = output.auto_actions {
+        let results = autonomous::execute_auto_actions(actions);
+        for result in &results {
+            eprintln!("[grove] Auto-action: {}", result);
+        }
+        results
+    } else {
+        Vec::new()
+    };
+
+    // 8. Apply venture updates from the model
+    let venture_update_results = if let Some(ref updates) = output.venture_updates {
+        let results = ventures::apply_venture_updates(updates);
+        for result in &results {
+            eprintln!("[grove] Venture update: {}", result);
+        }
+        results
+    } else {
+        Vec::new()
+    };
+
+    // 9. Extract ambient state
     let ambient_mood = output.ambient_mood.clone();
     let theme_hint = output.ambient_theme.clone();
 
     let conversation_id = uuid::Uuid::new_v4().to_string();
 
-    // 8. Return blocks to frontend
+    // 10. Return blocks to frontend
     Ok(ReasonResponse {
         blocks: output.blocks,
         timestamp: Utc::now().to_rfc3339(),
@@ -183,6 +220,8 @@ pub async fn reason(
         ambient_mood,
         theme_hint,
         conversation_id,
+        auto_action_results,
+        venture_update_results,
     })
 }
 
@@ -209,14 +248,14 @@ pub async fn reason_stream(
     let mut context =
         GroveContext::gather(user_input.clone()).map_err(|e| format!("Context error: {}", e))?;
 
-    // Inject plugin data
+    // Inject plugin data, digest, and reminders
     {
         let registry = plugin_state.0.lock().await;
         let plugin_data = registry.gather_data_context();
         let actions_ctx = registry.actions_context();
-        if !plugin_data.is_empty() || !actions_ctx.is_empty() {
-            context.plugin_data = format!("{}{}", plugin_data, actions_ctx);
-        }
+        let digest_ctx = reflection::digest_context();
+        let reminders_ctx = reflection::reminders_context();
+        context.plugin_data = format!("{}{}{}{}", plugin_data, actions_ctx, digest_ctx, reminders_ctx);
     }
 
     // 2. Classify intent
@@ -329,6 +368,28 @@ pub async fn reason_stream(
     };
     write_reasoning_log(&log_entry);
 
+    // Execute autonomous actions
+    let auto_action_results = if let Some(ref actions) = output.auto_actions {
+        let results = autonomous::execute_auto_actions(actions);
+        for result in &results {
+            eprintln!("[grove] Auto-action: {}", result);
+        }
+        results
+    } else {
+        Vec::new()
+    };
+
+    // Apply venture updates
+    let venture_update_results = if let Some(ref updates) = output.venture_updates {
+        let results = ventures::apply_venture_updates(updates);
+        for result in &results {
+            eprintln!("[grove] Venture update: {}", result);
+        }
+        results
+    } else {
+        Vec::new()
+    };
+
     let ambient_mood = output.ambient_mood.clone();
     let theme_hint = output.ambient_theme.clone();
     let conversation_id = uuid::Uuid::new_v4().to_string();
@@ -340,6 +401,8 @@ pub async fn reason_stream(
         ambient_mood,
         theme_hint,
         conversation_id,
+        auto_action_results,
+        venture_update_results,
     };
 
     // Emit completion event

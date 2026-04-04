@@ -12,6 +12,8 @@ export interface ReasonResponse {
   ambient_mood: string | null;
   theme_hint: string | null;
   conversation_id: string;
+  auto_action_results: string[];
+  venture_update_results: string[];
 }
 
 export async function reason(userInput?: string): Promise<ReasonResponse> {
@@ -173,6 +175,11 @@ export async function getFullMemory(): Promise<unknown> {
 // Conversation management
 export async function clearConversation(): Promise<void> {
   return invoke<void>("clear_conversation");
+}
+
+// Weekly digest
+export async function getWeeklyDigest(): Promise<unknown> {
+  return invoke<unknown>("get_weekly_digest");
 }
 
 // Streaming reasoning — kicks off reason_stream which emits events
