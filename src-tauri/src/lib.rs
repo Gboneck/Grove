@@ -10,8 +10,8 @@ use commands::{
     context::{read_context, write_context},
     identity::{generate_soul, is_soul_personalized},
     logs::get_reasoning_logs,
-    memory::{get_memory, get_memory_stats, record_action_engagement},
-    reason::{get_model_status, reason, set_model_mode, RouterState},
+    memory::{get_full_memory, get_memory, get_memory_stats, record_action_engagement},
+    reason::{clear_conversation, get_model_status, reason, set_model_mode, ConversationState, RouterState},
     setup::{check_setup, save_api_key},
     soul::{read_soul, write_soul},
     system::get_system_info,
@@ -49,15 +49,22 @@ pub fn run() {
     let plugin_manifests = loader::load_plugins();
     let plugin_count = plugin_manifests.len();
     let registry = PluginRegistry::new(plugin_manifests);
-    let plugin_state = PluginState(Arc::new(Mutex::new(registry)));
+    let plugin_state = PluginState(Arc::new(Mutex::new(registry.clone())));
+
+    // Run on_startup hooks
+    registry.run_hook("on_startup");
 
     if plugin_count > 0 {
         eprintln!("[grove] Loaded {} plugin(s)", plugin_count);
     }
 
+    // Initialize conversation state
+    let conversation_state = ConversationState(Arc::new(Mutex::new(Vec::new())));
+
     tauri::Builder::default()
         .manage(router_state)
         .manage(plugin_state)
+        .manage(conversation_state)
         .invoke_handler(tauri::generate_handler![
             reason,
             set_model_mode,
@@ -78,6 +85,8 @@ pub fn run() {
             is_soul_personalized,
             execute_action,
             list_actions,
+            get_full_memory,
+            clear_conversation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

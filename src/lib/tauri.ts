@@ -11,6 +11,7 @@ export interface ReasonResponse {
   model_source: "local" | "cloud";
   ambient_mood: string | null;
   theme_hint: string | null;
+  conversation_id: string;
 }
 
 export async function reason(userInput?: string): Promise<ReasonResponse> {
@@ -162,4 +163,14 @@ export async function recordActionEngagement(
   interacted: boolean
 ): Promise<void> {
   return invoke<void>("record_action_engagement", { blockType, interacted });
+}
+
+// Full memory (for viewer panel)
+export async function getFullMemory(): Promise<unknown> {
+  return invoke<unknown>("get_full_memory");
+}
+
+// Conversation management
+export async function clearConversation(): Promise<void> {
+  return invoke<void>("clear_conversation");
 }

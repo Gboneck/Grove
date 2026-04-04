@@ -19,6 +19,9 @@ Block schemas:
 { "type": "status", "items": [{ "name": "string", "status": "green|yellow|red", "detail": "string" }] }
 { "type": "insight", "icon": "alert|opportunity|warning|idea", "message": "string" }
 { "type": "input", "prompt": "string", "placeholder": "string" }
+{ "type": "progress", "label": "string", "value": number, "max": number, "detail": "string|null" }
+{ "type": "list", "heading": "string|null", "items": ["string", ...], "ordered": bool }
+{ "type": "quote", "text": "string", "attribution": "string|null" }
 { "type": "divider" }
 
 Behavioral rules:

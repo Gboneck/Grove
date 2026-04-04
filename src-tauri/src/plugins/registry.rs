@@ -2,6 +2,7 @@ use super::{PluginManifest, ActionDef, CustomBlockDef, DataSourceDef};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
+use std::process::Command;
 
 /// The plugin registry — holds all loaded plugins and provides lookups
 #[derive(Debug, Clone, Serialize)]
@@ -101,6 +102,45 @@ impl PluginRegistry {
             "\n--- AVAILABLE ACTIONS ---\nThe user has these executable actions available:\n{}",
             action_list.join("\n")
         )
+    }
+
+    /// Execute a lifecycle hook for all plugins
+    pub fn run_hook(&self, hook_name: &str) {
+        for plugin in &self.plugins {
+            let cmd = match hook_name {
+                "on_startup" => &plugin.hooks.on_startup,
+                "on_reason" => &plugin.hooks.on_reason,
+                "on_action" => &plugin.hooks.on_action,
+                "on_file_change" => &plugin.hooks.on_file_change,
+                _ => &None,
+            };
+            if let Some(command) = cmd {
+                if !command.is_empty() {
+                    match Command::new("sh").arg("-c").arg(command).output() {
+                        Ok(output) => {
+                            if !output.status.success() {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                eprintln!(
+                                    "[grove] Plugin '{}' hook '{}' failed: {}",
+                                    plugin.name, hook_name, stderr
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[grove] Plugin '{}' hook '{}' error: {}",
+                                plugin.name, hook_name, e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get all plugin manifests
+    pub fn all_plugins(&self) -> &[PluginManifest] {
+        &self.plugins
     }
 
     /// Get plugin summaries for the reasoning engine

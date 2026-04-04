@@ -5,6 +5,8 @@ interface GroveShellProps {
   children: ReactNode;
   onRefresh: () => void;
   onOpenSoul: () => void;
+  onOpenMemory: () => void;
+  onOpenLogs: () => void;
   isLoading: boolean;
   lastUpdated: Date | null;
   modelSource: "local" | "cloud" | null;
@@ -31,6 +33,8 @@ export default function GroveShell({
   children,
   onRefresh,
   onOpenSoul,
+  onOpenMemory,
+  onOpenLogs,
   isLoading,
   lastUpdated,
   modelSource,
@@ -65,13 +69,27 @@ export default function GroveShell({
             >
               Grove
             </span>
-            <span className="text-gray-600 text-sm">v0.2</span>
+            <span className="text-gray-600 text-sm">v0.4</span>
           </div>
           <div className="flex items-center gap-4">
             <ModelIndicator lastSource={modelSource} />
             <span className="text-sm text-grove-text-secondary font-mono">
               {timeStr}
             </span>
+            <button
+              onClick={onOpenMemory}
+              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
+              title="View Memory"
+            >
+              memory
+            </button>
+            <button
+              onClick={onOpenLogs}
+              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
+              title="Reasoning Logs"
+            >
+              logs
+            </button>
             <button
               onClick={onOpenSoul}
               className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"

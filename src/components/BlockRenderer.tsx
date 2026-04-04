@@ -6,6 +6,9 @@ import StatusRow from "./blocks/StatusRow";
 import InsightBlock from "./blocks/InsightBlock";
 import InputPrompt from "./blocks/InputPrompt";
 import Divider from "./blocks/Divider";
+import ProgressBlock from "./blocks/ProgressBlock";
+import ListBlock from "./blocks/ListBlock";
+import QuoteBlock from "./blocks/QuoteBlock";
 
 interface BlockRendererProps {
   blocks: Block[];
@@ -79,6 +82,33 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "divider":
             return <Divider key={i} />;
+          case "progress":
+            return (
+              <ProgressBlock
+                key={i}
+                label={block.label as string}
+                value={block.value as number}
+                max={(block.max as number) ?? 100}
+                detail={block.detail as string | undefined}
+              />
+            );
+          case "list":
+            return (
+              <ListBlock
+                key={i}
+                heading={block.heading as string | undefined}
+                items={block.items as string[]}
+                ordered={(block.ordered as boolean) ?? false}
+              />
+            );
+          case "quote":
+            return (
+              <QuoteBlock
+                key={i}
+                text={block.text as string}
+                attribution={block.attribution as string | undefined}
+              />
+            );
           default:
             return null;
         }

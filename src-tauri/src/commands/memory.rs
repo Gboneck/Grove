@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -174,8 +175,11 @@ pub fn record_session(
         });
     }
 
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let insights_clone = insights.clone();
+
     let session = Session {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: session_id.clone(),
         timestamp: now.to_rfc3339(),
         time_of_day: time_of_day.clone(),
         day_of_week: now.format("%A").to_string(),
@@ -213,9 +217,9 @@ pub fn record_session(
     }
 
     // Add new accumulated insights, cap at 50
-    for insight in insights {
-        if !memory.accumulated_insights.contains(&insight) {
-            memory.accumulated_insights.push(insight);
+    for insight in &insights_clone {
+        if !memory.accumulated_insights.contains(insight) {
+            memory.accumulated_insights.push(insight.clone());
         }
     }
     if memory.accumulated_insights.len() > 50 {
@@ -223,7 +227,20 @@ pub fn record_session(
         memory.accumulated_insights = memory.accumulated_insights[start..].to_vec();
     }
 
-    write_memory_file(&memory)
+    write_memory_file(&memory)?;
+
+    // Auto-extract facts from insights
+    if !insights_clone.is_empty() {
+        extract_facts_from_insights(&insights_clone, &session_id).ok();
+    }
+
+    // Learn patterns every 10 sessions
+    if memory.tuning.total_sessions % 10 == 0 {
+        learn_patterns().ok();
+        decay_facts().ok();
+    }
+
+    Ok(())
 }
 
 /// Record that the user engaged with a specific action/block
@@ -275,6 +292,139 @@ pub fn upsert_fact(category: &str, content: &str, source: &str) -> Result<(), St
     }
 
     write_memory_file(&memory)
+}
+
+/// Decay confidence of facts not confirmed recently.
+/// Called periodically (e.g., every 10 sessions).
+pub fn decay_facts() -> Result<(), String> {
+    let mut memory = read_memory_file()?;
+    let now = Utc::now();
+
+    for fact in memory.facts.iter_mut() {
+        if fact.superseded_by.is_some() {
+            continue;
+        }
+        // Parse last_confirmed and decay if stale
+        if let Ok(last) = chrono::DateTime::parse_from_rfc3339(&fact.last_confirmed) {
+            let days_stale = (now - last.with_timezone(&Utc)).num_days();
+            if days_stale > 30 {
+                fact.confidence = (fact.confidence - 0.05).max(0.1);
+            } else if days_stale > 14 {
+                fact.confidence = (fact.confidence - 0.02).max(0.2);
+            }
+        }
+    }
+
+    // Remove facts that have decayed below threshold
+    memory.facts.retain(|f| f.confidence > 0.1 || f.superseded_by.is_some());
+
+    write_memory_file(&memory)
+}
+
+/// Extract semantic facts from insights produced by the reasoning engine.
+/// Looks for patterns like "User prefers...", "User is...", "User works on..."
+pub fn extract_facts_from_insights(insights: &[String], session_id: &str) -> Result<(), String> {
+    for insight in insights {
+        let lower = insight.to_lowercase();
+
+        let category = if lower.contains("prefer") || lower.contains("likes") || lower.contains("style") {
+            Some("preference")
+        } else if lower.contains("goal") || lower.contains("wants to") || lower.contains("aims") {
+            Some("goal")
+        } else if lower.contains("works on") || lower.contains("project") || lower.contains("building") {
+            Some("identity")
+        } else if lower.contains("skill") || lower.contains("expert") || lower.contains("good at") {
+            Some("skill")
+        } else {
+            None
+        };
+
+        if let Some(cat) = category {
+            upsert_fact(cat, insight, session_id)?;
+        }
+    }
+    Ok(())
+}
+
+/// Learn procedural patterns from engagement data.
+/// Called after sessions to detect recurring behavioral patterns.
+pub fn learn_patterns() -> Result<(), String> {
+    let mut memory = read_memory_file()?;
+    let now = Utc::now().to_rfc3339();
+
+    // Detect block preference patterns from engagement
+    for (block_type, eng) in &memory.tuning.block_type_engagement {
+        if eng.shown < 5 {
+            continue;
+        }
+        let rate = eng.interacted as f64 / eng.shown as f64;
+
+        // Check if pattern already exists
+        let existing = memory.patterns.iter_mut().find(|p| {
+            p.pattern_type == "block_preference" && p.description.contains(block_type)
+        });
+
+        if let Some(pattern) = existing {
+            pattern.evidence_count += 1;
+            pattern.last_observed = now.clone();
+            pattern.effectiveness = rate;
+        } else if rate > 0.3 || (eng.shown > 10 && rate < 0.05) {
+            memory.patterns.push(ProceduralPattern {
+                id: uuid::Uuid::new_v4().to_string(),
+                pattern_type: "block_preference".to_string(),
+                description: if rate > 0.3 {
+                    format!("User frequently engages with '{}' blocks ({:.0}% rate)", block_type, rate * 100.0)
+                } else {
+                    format!("User rarely engages with '{}' blocks ({:.0}% rate)", block_type, rate * 100.0)
+                },
+                evidence_count: eng.shown as u32,
+                last_observed: now.clone(),
+                effectiveness: rate,
+            });
+        }
+    }
+
+    // Detect time-of-day patterns from sessions
+    if memory.sessions.len() >= 10 {
+        let mut time_counts: HashMap<String, u32> = HashMap::new();
+        for session in memory.sessions.iter().rev().take(20) {
+            *time_counts.entry(session.time_of_day.clone()).or_default() += 1;
+        }
+        for (time, count) in &time_counts {
+            if *count >= 5 {
+                let existing = memory.patterns.iter().any(|p| {
+                    p.pattern_type == "time_pattern" && p.description.contains(time)
+                });
+                if !existing {
+                    memory.patterns.push(ProceduralPattern {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        pattern_type: "time_pattern".to_string(),
+                        description: format!("User frequently uses Grove in the {} ({} of last 20 sessions)", time, count),
+                        evidence_count: *count,
+                        last_observed: now.clone(),
+                        effectiveness: *count as f64 / 20.0,
+                    });
+                }
+            }
+        }
+    }
+
+    // Cap patterns at 50
+    if memory.patterns.len() > 50 {
+        memory.patterns.sort_by(|a, b| {
+            b.evidence_count.cmp(&a.evidence_count)
+        });
+        memory.patterns.truncate(50);
+    }
+
+    write_memory_file(&memory)
+}
+
+/// Get full memory state for the frontend memory viewer
+#[tauri::command]
+pub async fn get_full_memory() -> Result<serde_json::Value, String> {
+    let memory = read_memory_file()?;
+    serde_json::to_value(&memory).map_err(|e| format!("Failed to serialize memory: {}", e))
 }
 
 #[tauri::command]

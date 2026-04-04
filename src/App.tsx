@@ -4,10 +4,13 @@ import BlockRenderer from "./components/BlockRenderer";
 import LoadingState from "./components/LoadingState";
 import SetupScreen from "./components/SetupScreen";
 import SoulEditor from "./components/SoulEditor";
+import MemoryPanel from "./components/panels/MemoryPanel";
+import LogsPanel from "./components/panels/LogsPanel";
 import {
   reason as invokeReason,
   checkSetup,
   getFileStamps,
+  clearConversation,
   Block,
   SetupStatus,
   FileStamps,
@@ -42,6 +45,8 @@ export default function App() {
   const [ambientMood, setAmbientMood] = useState<string | null>(null);
   const [themeHint, setThemeHint] = useState<string | null>(null);
   const [soulEditorOpen, setSoulEditorOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
   const lastStampsRef = useRef<FileStamps | null>(null);
 
   // Check setup on mount
@@ -150,8 +155,13 @@ export default function App() {
   return (
     <>
       <GroveShell
-        onRefresh={() => reason()}
+        onRefresh={() => {
+          clearConversation().catch(() => {});
+          reason();
+        }}
         onOpenSoul={() => setSoulEditorOpen(true)}
+        onOpenMemory={() => setMemoryOpen(true)}
+        onOpenLogs={() => setLogsOpen(true)}
         isLoading={isLoading}
         lastUpdated={lastUpdated}
         modelSource={modelSource}
@@ -170,6 +180,14 @@ export default function App() {
       <SoulEditor
         isOpen={soulEditorOpen}
         onClose={() => setSoulEditorOpen(false)}
+      />
+      <MemoryPanel
+        isOpen={memoryOpen}
+        onClose={() => setMemoryOpen(false)}
+      />
+      <LogsPanel
+        isOpen={logsOpen}
+        onClose={() => setLogsOpen(false)}
       />
     </>
   );

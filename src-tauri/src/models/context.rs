@@ -13,6 +13,7 @@ pub struct GroveContext {
     pub semantic_facts: String,
     pub tuning_hints: String,
     pub plugin_data: String,
+    pub conversation_history: Option<String>,
     pub local_time: String,
     pub day_of_week: String,
     pub date: String,
@@ -144,6 +145,7 @@ impl GroveContext {
             semantic_facts,
             tuning_hints,
             plugin_data: String::new(), // Filled by caller if plugins are active
+            conversation_history: None, // Filled by caller for multi-turn
             local_time: now.to_rfc3339(),
             day_of_week: now.format("%A").to_string(),
             date: now.format("%B %-d, %Y").to_string(),
@@ -172,6 +174,7 @@ Time since last session: {}
 {}
 {}{}{}
 {}
+{}
 
 Decide what to show. Return JSON only."#,
             self.local_time,
@@ -185,6 +188,10 @@ Decide what to show. Return JSON only."#,
             self.semantic_facts,
             self.tuning_hints,
             self.plugin_data,
+            self.conversation_history
+                .as_ref()
+                .map(|h| format!("\n--- CONVERSATION HISTORY ---\n{}", h))
+                .unwrap_or_default(),
             self.user_input
                 .as_ref()
                 .map(|i| format!("--- USER INPUT ---\n{}", i))
