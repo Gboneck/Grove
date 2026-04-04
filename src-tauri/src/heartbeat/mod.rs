@@ -43,8 +43,8 @@ pub fn start_heartbeat(
     let detector_clone = detector.clone();
     let tick_secs = tick_interval_secs;
 
-    // Spawn the background heartbeat loop
-    tokio::spawn(async move {
+    // Spawn the background heartbeat loop using tauri's async runtime
+    tauri::async_runtime::spawn(async move {
         let interval_duration = std::time::Duration::from_secs(tick_secs);
         let mut interval = tokio::time::interval(interval_duration);
         interval.tick().await; // Skip first immediate tick
