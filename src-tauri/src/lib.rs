@@ -15,8 +15,8 @@ use commands::{
     memory::{get_full_memory, get_memory, get_memory_stats, record_action_engagement},
     profiles::{create_profile, delete_profile, list_profiles, switch_profile},
     reason::{
-        clear_conversation, get_model_status, reason, set_model_mode, ConversationState,
-        RouterState,
+        clear_conversation, get_model_status, reason, reason_stream, set_model_mode,
+        ConversationState, RouterState,
     },
     setup::{check_setup, save_api_key},
     soul::{read_soul, write_soul},
@@ -155,6 +155,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             reason,
+            reason_stream,
             set_model_mode,
             get_model_status,
             read_soul,

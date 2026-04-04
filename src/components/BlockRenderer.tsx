@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Block } from "../lib/tauri";
 import { recordActionEngagement } from "../lib/tauri";
 import TextBlock from "./blocks/TextBlock";
@@ -21,23 +21,38 @@ function BlockWrapper({
   blockType,
   children,
   dismissable = true,
+  animate = false,
 }: {
   blockType: string;
   children: React.ReactNode;
   dismissable?: boolean;
+  animate?: boolean;
 }) {
   const [dismissed, setDismissed] = useState(false);
+  const [visible, setVisible] = useState(!animate);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (animate) {
+      // Trigger fade-in on next frame
+      requestAnimationFrame(() => setVisible(true));
+    }
+  }, [animate]);
 
   const handleDismiss = useCallback(() => {
     setDismissed(true);
-    // Track that user dismissed this block type
     recordActionEngagement(blockType, false).catch(() => {});
   }, [blockType]);
 
   if (dismissed) return null;
 
   return (
-    <div className="group relative">
+    <div
+      ref={ref}
+      className={`group relative transition-all duration-500 ${
+        visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+      }`}
+    >
       {children}
       {dismissable && (
         <button
@@ -53,14 +68,22 @@ function BlockWrapper({
 }
 
 export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
+  // Track the previous block count to know which are newly streamed
+  const prevCountRef = useRef(0);
+  const isStreaming = blocks.length !== prevCountRef.current;
+  useEffect(() => {
+    prevCountRef.current = blocks.length;
+  }, [blocks.length]);
+
   return (
     <div className="space-y-6">
       {blocks.map((block, i) => {
         const key = `${block.type}-${i}`;
+        const isNew = isStreaming && i >= prevCountRef.current;
         switch (block.type) {
           case "text":
             return (
-              <BlockWrapper key={key} blockType="text">
+              <BlockWrapper key={key} blockType="text" animate={isNew}>
                 <TextBlock
                   heading={block.heading as string}
                   body={block.body as string}
@@ -69,7 +92,7 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "metric":
             return (
-              <BlockWrapper key={key} blockType="metric">
+              <BlockWrapper key={key} blockType="metric" animate={isNew}>
                 <MetricCard
                   label={block.label as string}
                   value={block.value as string}
@@ -79,7 +102,7 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "actions":
             return (
-              <BlockWrapper key={key} blockType="actions" dismissable={false}>
+              <BlockWrapper key={key} blockType="actions" dismissable={false} animate={isNew}>
                 <ActionList
                   title={block.title as string}
                   items={block.items as { action: string; detail: string }[]}
@@ -89,7 +112,7 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "status":
             return (
-              <BlockWrapper key={key} blockType="status">
+              <BlockWrapper key={key} blockType="status" animate={isNew}>
                 <StatusRow
                   items={
                     block.items as {
@@ -103,7 +126,7 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "insight":
             return (
-              <BlockWrapper key={key} blockType="insight">
+              <BlockWrapper key={key} blockType="insight" animate={isNew}>
                 <InsightBlock
                   icon={
                     block.icon as "alert" | "opportunity" | "warning" | "idea"
@@ -114,7 +137,7 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "input":
             return (
-              <BlockWrapper key={key} blockType="input" dismissable={false}>
+              <BlockWrapper key={key} blockType="input" dismissable={false} animate={isNew}>
                 <InputPrompt
                   prompt={block.prompt as string}
                   placeholder={block.placeholder as string}
@@ -126,7 +149,7 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             return <Divider key={key} />;
           case "progress":
             return (
-              <BlockWrapper key={key} blockType="progress">
+              <BlockWrapper key={key} blockType="progress" animate={isNew}>
                 <ProgressBlock
                   label={block.label as string}
                   value={block.value as number}
@@ -137,7 +160,7 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "list":
             return (
-              <BlockWrapper key={key} blockType="list">
+              <BlockWrapper key={key} blockType="list" animate={isNew}>
                 <ListBlock
                   heading={block.heading as string | undefined}
                   items={block.items as string[]}
@@ -147,7 +170,7 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "quote":
             return (
-              <BlockWrapper key={key} blockType="quote">
+              <BlockWrapper key={key} blockType="quote" animate={isNew}>
                 <QuoteBlock
                   text={block.text as string}
                   attribution={block.attribution as string | undefined}

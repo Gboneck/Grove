@@ -3,6 +3,7 @@ pub mod config;
 pub mod context;
 pub mod gemma;
 pub mod router;
+pub mod streaming;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

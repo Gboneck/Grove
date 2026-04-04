@@ -174,3 +174,10 @@ export async function getFullMemory(): Promise<unknown> {
 export async function clearConversation(): Promise<void> {
   return invoke<void>("clear_conversation");
 }
+
+// Streaming reasoning — kicks off reason_stream which emits events
+export async function reasonStream(userInput?: string): Promise<ReasonResponse> {
+  return invoke<ReasonResponse>("reason_stream", {
+    userInput: userInput || null,
+  });
+}

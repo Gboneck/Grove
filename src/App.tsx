@@ -13,7 +13,7 @@ import ContextEditor from "./components/panels/ContextEditor";
 import SearchPanel from "./components/panels/SearchPanel";
 import CommandPalette from "./components/CommandPalette";
 import {
-  reason as invokeReason,
+  reasonStream,
   checkSetup,
   getFileStamps,
   clearConversation,
@@ -90,11 +90,26 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
+  const streamingBlocksRef = useRef<Block[]>([]);
+
   const reason = useCallback(async (userInput?: string) => {
     setIsLoading(true);
     setError(false);
+    setBlocks([]); // Clear blocks for streaming
+    streamingBlocksRef.current = [];
+
+    // Listen for individual blocks as they stream in
+    let blockUnsub: (() => void) | null = null;
     try {
-      const response = await invokeReason(userInput);
+      blockUnsub = await listen<Block>("reason-block", (event) => {
+        streamingBlocksRef.current = [...streamingBlocksRef.current, event.payload];
+        setBlocks([...streamingBlocksRef.current]);
+      }).then(fn => { return fn; });
+
+      // This call returns when streaming is complete
+      const response = await reasonStream(userInput);
+
+      // Use the final authoritative response (may have all blocks if streaming didn't emit)
       if (response.blocks && Array.isArray(response.blocks)) {
         setBlocks(response.blocks);
         setLastUpdated(new Date());
@@ -111,6 +126,7 @@ export default function App() {
       setLastUpdated(new Date());
       setModelSource(null);
     } finally {
+      if (blockUnsub) blockUnsub();
       setIsLoading(false);
     }
   }, []);
@@ -258,11 +274,14 @@ export default function App() {
         ambientMood={ambientMood}
         themeHint={themeHint}
       >
-        {isLoading ? (
-          <LoadingState />
-        ) : (
-          <div className={error ? "opacity-70" : ""}>
-            <BlockRenderer blocks={blocks} onInput={handleInput} />
+        <div className={error ? "opacity-70" : ""}>
+          <BlockRenderer blocks={blocks} onInput={handleInput} />
+        </div>
+        {isLoading && blocks.length === 0 && <LoadingState />}
+        {isLoading && blocks.length > 0 && (
+          <div className="flex items-center gap-2 mt-4 text-sm text-grove-text-secondary animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-grove-accent" />
+            streaming...
           </div>
         )}
       </GroveShell>

@@ -1,4 +1,7 @@
+use futures_util::StreamExt;
+use serde_json::Value;
 use super::config::GroveConfig;
+use super::streaming::BlockExtractor;
 use super::{ModelError, ModelSource, RawReasoningResponse, ReasoningOutput};
 use std::fs;
 
@@ -46,6 +49,111 @@ impl ClaudeModel {
 
     pub fn is_available(&self) -> bool {
         self.api_key.is_some()
+    }
+
+    /// Stream reasoning — calls the callback with each new block as it's parsed.
+    pub async fn reason_streaming<F>(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        escalated: bool,
+        mut on_block: F,
+    ) -> Result<ReasoningOutput, ModelError>
+    where
+        F: FnMut(Value) + Send,
+    {
+        let api_key = self
+            .api_key
+            .as_ref()
+            .ok_or_else(|| ModelError::Unavailable("ANTHROPIC_API_KEY not set".to_string()))?;
+
+        let full_message = if escalated {
+            format!(
+                "{}\n\n[ESCALATED FROM LOCAL MODEL — apply deeper reasoning]",
+                user_message
+            )
+        } else {
+            user_message.to_string()
+        };
+
+        let response = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("Content-Type", "application/json")
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&serde_json::json!({
+                "model": self.model_name,
+                "max_tokens": 4096,
+                "stream": true,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": full_message}]
+            }))
+            .send()
+            .await
+            .map_err(|e| ModelError::RequestFailed(format!("Claude stream request failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ModelError::RequestFailed(format!(
+                "Claude API error ({}): {}",
+                status, body
+            )));
+        }
+
+        let mut buffer = String::new();
+        let mut extractor = BlockExtractor::new();
+        let mut stream = response.bytes_stream();
+        let mut line_buffer = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| {
+                ModelError::RequestFailed(format!("Stream read error: {}", e))
+            })?;
+
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            line_buffer.push_str(&chunk_str);
+
+            // Process complete SSE lines
+            while let Some(newline_pos) = line_buffer.find('\n') {
+                let line = line_buffer[..newline_pos].trim().to_string();
+                line_buffer = line_buffer[newline_pos + 1..].to_string();
+
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if data == "[DONE]" {
+                        continue;
+                    }
+                    if let Ok(event) = serde_json::from_str::<Value>(data) {
+                        // Extract text delta from content_block_delta events
+                        if event.get("type").and_then(|t| t.as_str()) == Some("content_block_delta") {
+                            if let Some(text) = event
+                                .get("delta")
+                                .and_then(|d| d.get("text"))
+                                .and_then(|t| t.as_str())
+                            {
+                                buffer.push_str(text);
+
+                                let new_blocks = extractor.extract_new_blocks(&buffer);
+                                for block in new_blocks {
+                                    on_block(block);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Parse final complete response
+        let raw: RawReasoningResponse = serde_json::from_str(&buffer).map_err(|e| {
+            ModelError::ParseError(format!(
+                "Failed to parse streamed Claude JSON: {}. Raw: {}",
+                e, buffer
+            ))
+        })?;
+
+        Ok(raw.into_output(ModelSource::Cloud))
     }
 
     pub async fn reason(

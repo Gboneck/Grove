@@ -1,3 +1,4 @@
+use serde_json::Value;
 use super::claude::ClaudeModel;
 use super::config::GroveConfig;
 use super::context::GroveContext;
@@ -199,6 +200,49 @@ impl ModelRouter {
                 }
                 Err(_) => self.claude.reason(system_prompt, &user_message, false).await,
             }
+        }
+    }
+
+    /// Streaming variant of route — emits blocks incrementally via callback.
+    /// Uses simplified routing: picks a model and streams from it.
+    pub async fn route_streaming<F>(
+        &self,
+        context: &GroveContext,
+        intent: &ReasoningIntent,
+        on_block: F,
+    ) -> Result<ReasoningOutput, ModelError>
+    where
+        F: FnMut(Value) + Send,
+    {
+        let system_prompt = gemma::system_prompt();
+        let user_message = context.to_user_message();
+
+        match &self.mode {
+            ModelMode::LocalOnly => {
+                return self.gemma.reason_streaming(system_prompt, &user_message, on_block).await;
+            }
+            ModelMode::CloudOnly => {
+                return self.claude.reason_streaming(system_prompt, &user_message, false, on_block).await;
+            }
+            ModelMode::Auto => {}
+        }
+
+        let gemma_available = self.gemma.is_available().await;
+        let claude_available = self.claude.is_available();
+
+        if intent.requires_deep_reasoning() && claude_available {
+            return self.claude.reason_streaming(system_prompt, &user_message, false, on_block).await;
+        }
+
+        if gemma_available {
+            // For streaming, we commit to Gemma upfront (no mid-stream escalation)
+            self.gemma.reason_streaming(system_prompt, &user_message, on_block).await
+        } else if claude_available {
+            self.claude.reason_streaming(system_prompt, &user_message, false, on_block).await
+        } else {
+            Err(ModelError::Unavailable(
+                "No models available. Start Ollama or set ANTHROPIC_API_KEY.".to_string(),
+            ))
         }
     }
 

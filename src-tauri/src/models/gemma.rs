@@ -1,4 +1,7 @@
+use futures_util::StreamExt;
+use serde_json::Value;
 use super::config::GroveConfig;
+use super::streaming::BlockExtractor;
 use super::{ModelError, ModelSource, RawReasoningResponse, ReasoningIntent, ReasoningOutput};
 
 const SYSTEM_PROMPT: &str = r#"You are the reasoning engine of Grove OS — a personal operating system.
@@ -118,6 +121,91 @@ Input: {}"#,
             s if s.contains("respond_to_input") => Some(ReasoningIntent::RespondToInput(input)),
             _ => None,
         }
+    }
+
+    /// Stream reasoning — calls the callback with each new block as it's parsed.
+    /// Returns the final complete output.
+    pub async fn reason_streaming<F>(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        mut on_block: F,
+    ) -> Result<ReasoningOutput, ModelError>
+    where
+        F: FnMut(Value) + Send,
+    {
+        let url = format!("{}/api/chat", self.base_url);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({
+                "model": self.model_name,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                "format": "json",
+                "stream": true,
+                "options": {
+                    "num_ctx": self.context_window,
+                    "temperature": 0.7
+                }
+            }))
+            .send()
+            .await
+            .map_err(|e| ModelError::RequestFailed(format!("Ollama stream request failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ModelError::RequestFailed(format!(
+                "Ollama error ({}): {}",
+                status, body
+            )));
+        }
+
+        let mut buffer = String::new();
+        let mut extractor = BlockExtractor::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| {
+                ModelError::RequestFailed(format!("Stream read error: {}", e))
+            })?;
+
+            let chunk_str = String::from_utf8_lossy(&chunk);
+
+            // Ollama streaming: each line is a JSON object with message.content
+            for line in chunk_str.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Ok(json) = serde_json::from_str::<Value>(line) {
+                    if let Some(content) = json
+                        .get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_str())
+                    {
+                        buffer.push_str(content);
+
+                        // Try to extract newly-completed blocks
+                        let new_blocks = extractor.extract_new_blocks(&buffer);
+                        for block in new_blocks {
+                            on_block(block);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Parse the final complete response
+        let raw: RawReasoningResponse = serde_json::from_str(&buffer).map_err(|e| {
+            ModelError::ParseError(format!("Failed to parse streamed Gemma JSON: {}. Raw: {}", e, buffer))
+        })?;
+
+        Ok(raw.into_output(ModelSource::Local))
     }
 
     pub async fn reason(
