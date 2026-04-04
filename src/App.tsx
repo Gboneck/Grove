@@ -14,7 +14,7 @@ const FALLBACK_BLOCKS: Block[] = [
     type: "insight",
     icon: "warning",
     message:
-      "If this persists, check that your ANTHROPIC_API_KEY is set in ~/.grove/.env",
+      "Make sure Ollama is running (for local reasoning) or ANTHROPIC_API_KEY is set in ~/.grove/.env (for cloud reasoning).",
   },
 ];
 
@@ -23,6 +23,9 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState(false);
+  const [modelSource, setModelSource] = useState<"local" | "cloud" | null>(
+    null
+  );
 
   const reason = useCallback(async (userInput?: string) => {
     setIsLoading(true);
@@ -32,6 +35,7 @@ export default function App() {
       if (response.blocks && Array.isArray(response.blocks)) {
         setBlocks(response.blocks);
         setLastUpdated(new Date());
+        setModelSource(response.model_source);
       } else {
         throw new Error("Invalid response structure");
       }
@@ -40,6 +44,7 @@ export default function App() {
       setError(true);
       setBlocks(FALLBACK_BLOCKS);
       setLastUpdated(new Date());
+      setModelSource(null);
     } finally {
       setIsLoading(false);
     }
@@ -58,6 +63,7 @@ export default function App() {
       onRefresh={() => reason()}
       isLoading={isLoading}
       lastUpdated={lastUpdated}
+      modelSource={modelSource}
     >
       {isLoading ? (
         <LoadingState />

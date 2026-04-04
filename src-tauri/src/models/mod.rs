@@ -1,0 +1,100 @@
+pub mod claude;
+pub mod config;
+pub mod context;
+pub mod gemma;
+pub mod router;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Which model handled the reasoning
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSource {
+    Local,  // Gemma via Ollama
+    Cloud,  // Claude API
+}
+
+/// The intent behind a reasoning request — determines routing
+#[derive(Debug, Clone)]
+pub enum ReasoningIntent {
+    ComposeUI,
+    RespondToInput(String),
+    PlanAction,
+    Reflect,
+}
+
+impl ReasoningIntent {
+    /// Fast-path intents that Gemma should handle by default
+    pub fn is_fast_path(&self) -> bool {
+        matches!(self, ReasoningIntent::ComposeUI | ReasoningIntent::Reflect)
+    }
+
+    /// Complex intents that should go straight to Claude
+    pub fn requires_deep_reasoning(&self) -> bool {
+        matches!(self, ReasoningIntent::PlanAction)
+    }
+}
+
+/// Parsed output from either model
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningOutput {
+    pub blocks: Vec<Value>,
+    pub confidence: f64,
+    pub needs_escalation: bool,
+    pub escalation_reason: Option<String>,
+    pub session_summary: Option<String>,
+    pub insights: Option<Vec<String>>,
+    pub source: ModelSource,
+}
+
+/// Raw JSON shape returned by the reasoning models
+#[derive(Debug, Deserialize)]
+pub struct RawReasoningResponse {
+    pub blocks: Vec<Value>,
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
+    #[serde(default)]
+    pub needs_escalation: bool,
+    #[serde(default)]
+    pub escalation_reason: Option<String>,
+    #[serde(default)]
+    pub session_summary: Option<String>,
+    #[serde(default)]
+    pub insights: Option<Vec<String>>,
+}
+
+fn default_confidence() -> f64 {
+    0.8
+}
+
+impl RawReasoningResponse {
+    pub fn into_output(self, source: ModelSource) -> ReasoningOutput {
+        ReasoningOutput {
+            blocks: self.blocks,
+            confidence: self.confidence,
+            needs_escalation: self.needs_escalation,
+            escalation_reason: self.escalation_reason,
+            session_summary: self.session_summary,
+            insights: self.insights,
+            source,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ModelError {
+    Unavailable(String),
+    RequestFailed(String),
+    ParseError(String),
+}
+
+impl std::fmt::Display for ModelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ModelError::Unavailable(msg) => write!(f, "Model unavailable: {}", msg),
+            ModelError::RequestFailed(msg) => write!(f, "Request failed: {}", msg),
+            ModelError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+        }
+    }
+}

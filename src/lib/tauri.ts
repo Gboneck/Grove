@@ -8,12 +8,29 @@ export interface Block {
 export interface ReasonResponse {
   blocks: Block[];
   timestamp: string;
+  model_source: "local" | "cloud";
 }
 
 export async function reason(userInput?: string): Promise<ReasonResponse> {
   return invoke<ReasonResponse>("reason", {
     userInput: userInput || null,
   });
+}
+
+export interface ModelStatus {
+  gemma_available: boolean;
+  claude_available: boolean;
+  mode: string;
+  local_model: string;
+  cloud_model: string;
+}
+
+export async function getModelStatus(): Promise<ModelStatus> {
+  return invoke<ModelStatus>("get_model_status");
+}
+
+export async function setModelMode(mode: "auto" | "local_only" | "cloud_only"): Promise<void> {
+  return invoke<void>("set_model_mode", { mode });
 }
 
 export async function readSoul(): Promise<string> {

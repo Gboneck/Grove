@@ -1,10 +1,12 @@
 import { ReactNode, useEffect, useState } from "react";
+import ModelIndicator from "./ModelIndicator";
 
 interface GroveShellProps {
   children: ReactNode;
   onRefresh: () => void;
   isLoading: boolean;
   lastUpdated: Date | null;
+  modelSource: "local" | "cloud" | null;
 }
 
 export default function GroveShell({
@@ -12,6 +14,7 @@ export default function GroveShell({
   onRefresh,
   isLoading,
   lastUpdated,
+  modelSource,
 }: GroveShellProps) {
   const [time, setTime] = useState(new Date());
 
@@ -32,12 +35,13 @@ export default function GroveShell({
       <header className="sticky top-0 z-10 bg-grove-bg/90 backdrop-blur-sm border-b border-grove-border">
         <div className="max-w-[640px] mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-grove-accent font-semibold tracking-wide">
+            <span className="text-grove-accent font-semibold tracking-wide font-display">
               Grove
             </span>
-            <span className="text-gray-600 text-sm">v0.1</span>
+            <span className="text-gray-600 text-sm">v0.2</span>
           </div>
           <div className="flex items-center gap-4">
+            <ModelIndicator lastSource={modelSource} />
             <span className="text-sm text-grove-text-secondary font-mono">
               {timeStr}
             </span>
@@ -68,6 +72,11 @@ export default function GroveShell({
               second: "2-digit",
               hour12: true,
             })}
+            {modelSource && (
+              <span className="ml-2">
+                via {modelSource === "local" ? "gemma" : "claude"}
+              </span>
+            )}
           </p>
         </footer>
       )}
