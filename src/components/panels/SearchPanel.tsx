@@ -1,8 +1,13 @@
-import { useState, useRef, useEffect } from "react";
-import { getFullMemory, getReasoningLogs } from "../../lib/tauri";
+import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  getFullMemory,
+  getReasoningLogs,
+  vectorSearch,
+  vectorStatus,
+} from "../../lib/tauri";
 
 interface SearchResult {
-  type: "session" | "fact" | "insight" | "log";
+  type: "session" | "fact" | "insight" | "log" | "vector";
   title: string;
   detail: string;
   timestamp?: string;
@@ -18,13 +23,21 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [qdrantAvailable, setQdrantAvailable] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       setQuery("");
       setResults([]);
       setTimeout(() => inputRef.current?.focus(), 50);
+      // Check Qdrant availability
+      vectorStatus()
+        .then((s) => setQdrantAvailable(s.available))
+        .catch(() => setQdrantAvailable(false));
     }
   }, [isOpen]);
 
@@ -39,7 +52,9 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
     const found: SearchResult[] = [];
 
     try {
-      // Search memory
+      // Semantic vector search (runs in parallel with keyword search)
+      const vectorPromise = vectorSearch(q, 5).catch(() => []);
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const memory = (await getFullMemory()) as any;
 
@@ -110,20 +125,59 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
           });
         }
       }
+
+      // Merge vector search results (semantic matches that keyword missed)
+      const vectorResults = await vectorPromise;
+      for (const vr of vectorResults) {
+        const alreadyFound = found.some(
+          (f) => f.title.toLowerCase() === vr.content.toLowerCase()
+        );
+        if (!alreadyFound) {
+          found.push({
+            type: "vector",
+            title: vr.content,
+            detail: vr.category,
+            meta: `${(vr.score * 100).toFixed(0)}% match`,
+          });
+        }
+      }
     } catch (e) {
       console.error("Search error:", e);
     }
 
     setResults(found);
+    setSelectedIndex(-1);
     setSearching(false);
   };
 
   const handleInput = (value: string) => {
     setQuery(value);
-    // Debounce
-    const timer = setTimeout(() => search(value), 300);
-    return () => clearTimeout(timer);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => search(value), 300);
   };
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedIndex((prev) => Math.min(prev + 1, results.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedIndex((prev) => Math.max(prev - 1, -1));
+      } else if (e.key === "Escape") {
+        onClose();
+      }
+    },
+    [results.length, onClose]
+  );
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (selectedIndex >= 0 && resultsRef.current) {
+      const items = resultsRef.current.querySelectorAll("[data-result-item]");
+      items[selectedIndex]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex]);
 
   if (!isOpen) return null;
 
@@ -132,6 +186,7 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
     fact: "bg-grove-accent/20 text-grove-accent",
     insight: "bg-[#c084fc]/20 text-[#c084fc]",
     log: "bg-grove-model-cloud/20 text-grove-model-cloud",
+    vector: "bg-[#34d399]/20 text-[#34d399]",
   };
 
   return (
@@ -148,19 +203,24 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
             ref={inputRef}
             value={query}
             onChange={(e) => handleInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && onClose()}
+            onKeyDown={handleKeyDown}
             placeholder="Search memory, facts, logs..."
             className="flex-1 bg-transparent text-sm text-grove-text-primary placeholder-gray-600 focus:outline-none"
           />
           {searching && (
-            <span className="text-[10px] text-grove-text-secondary">
+            <span className="text-[10px] text-grove-text-secondary animate-pulse">
               searching...
+            </span>
+          )}
+          {qdrantAvailable && (
+            <span className="text-[10px] text-[#34d399]" title="Qdrant vector search active">
+              semantic
             </span>
           )}
         </div>
 
         {/* Results */}
-        <div className="max-h-[400px] overflow-y-auto">
+        <div className="max-h-[400px] overflow-y-auto" ref={resultsRef}>
           {results.length === 0 && query.length >= 2 && !searching ? (
             <div className="px-4 py-8 text-center text-xs text-grove-text-secondary">
               No results found
@@ -174,7 +234,12 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
               {results.map((r, i) => (
                 <div
                   key={i}
-                  className="px-4 py-3 hover:bg-grove-surface transition-colors border-b border-grove-border/50 last:border-0"
+                  data-result-item
+                  className={`px-4 py-3 transition-colors border-b border-grove-border/50 last:border-0 ${
+                    i === selectedIndex
+                      ? "bg-grove-accent/10 border-l-2 border-l-grove-accent"
+                      : "hover:bg-grove-surface"
+                  }`}
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <span

@@ -53,6 +53,7 @@ pub async fn reason(
     conversation: tauri::State<'_, ConversationState>,
     plugin_state: tauri::State<'_, PluginState>,
     role_state: tauri::State<'_, crate::RoleState>,
+    cycle_counter: tauri::State<'_, crate::CycleCounter>,
 ) -> Result<ReasonResponse, String> {
     let start = Instant::now();
 
@@ -89,6 +90,20 @@ pub async fn reason(
             if let Some(role) = roles::get_role(role_name) {
                 context.role_prompt = roles::role_prompt_modifier(&role);
             }
+        }
+    }
+
+    // Inject soul enrichment prompts for early phases
+    {
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem = memory::read_memory_file().unwrap_or_default();
+        let phase = RelationshipPhase::from_metrics(soul.completeness(), mem.sessions.len() as u32);
+        let enrichment = crate::soul::enrichment::enrichment_context(&soul, phase);
+        if !enrichment.is_empty() {
+            context.plugin_data.push_str(&enrichment);
         }
     }
 
@@ -236,6 +251,18 @@ pub async fn reason(
     };
     write_reasoning_log(&log_entry);
 
+    // 6b. Sync to Qdrant every 5th reasoning cycle (debounced)
+    {
+        let count = cycle_counter.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if count % 5 == 0 {
+            tokio::spawn(async {
+                if crate::memory::vector::is_available().await {
+                    crate::memory::vector::sync_from_json().await.ok();
+                }
+            });
+        }
+    }
+
     // 7. Execute autonomous actions through autonomy gate
     let auto_action_results = if let Some(ref actions) = output.auto_actions {
         // Determine relationship phase for autonomy gating
@@ -305,6 +332,7 @@ pub async fn reason_stream(
     conversation: tauri::State<'_, ConversationState>,
     plugin_state: tauri::State<'_, PluginState>,
     role_state: tauri::State<'_, crate::RoleState>,
+    cycle_counter: tauri::State<'_, crate::CycleCounter>,
 ) -> Result<ReasonResponse, String> {
     use tauri::Emitter;
 
@@ -343,6 +371,20 @@ pub async fn reason_stream(
             if let Some(role) = roles::get_role(role_name) {
                 context.role_prompt = roles::role_prompt_modifier(&role);
             }
+        }
+    }
+
+    // Inject soul enrichment prompts for early phases
+    {
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem = memory::read_memory_file().unwrap_or_default();
+        let phase = RelationshipPhase::from_metrics(soul.completeness(), mem.sessions.len() as u32);
+        let enrichment = crate::soul::enrichment::enrichment_context(&soul, phase);
+        if !enrichment.is_empty() {
+            context.plugin_data.push_str(&enrichment);
         }
     }
 
@@ -485,6 +527,18 @@ pub async fn reason_stream(
         duration_ms,
     };
     write_reasoning_log(&log_entry);
+
+    // Sync to Qdrant every 5th reasoning cycle (debounced)
+    {
+        let count = cycle_counter.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if count % 5 == 0 {
+            tokio::spawn(async {
+                if crate::memory::vector::is_available().await {
+                    crate::memory::vector::sync_from_json().await.ok();
+                }
+            });
+        }
+    }
 
     // Execute autonomous actions through autonomy gate
     let auto_action_results = if let Some(ref actions) = output.auto_actions {

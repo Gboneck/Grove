@@ -31,6 +31,10 @@ services:
     stdin_open: true
 
   # Ollama — local LLM inference
+  # Note: GPU acceleration is auto-detected.
+  #   - Linux with NVIDIA: uses docker-compose.gpu.yml override
+  #   - macOS: uses Metal via native Ollama (run `ollama serve` locally instead)
+  #   - CPU fallback: works everywhere, just slower
   ollama:
     image: ollama/ollama:latest
     container_name: grove-ollama
@@ -38,13 +42,6 @@ services:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     restart: unless-stopped
 
   # Ollama model puller — downloads Gemma on first run

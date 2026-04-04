@@ -1,0 +1,50 @@
+# Weather Plugin — provides local weather as ambient context.
+# Place in ~/.grove/plugins/weather.toml
+#
+# Uses wttr.in (no API key needed) for basic weather data.
+# Configurable location — defaults to auto-detect via IP.
+
+name = "weather"
+version = "0.1.0"
+description = "Provides local weather context to the reasoning model for ambient awareness"
+enabled = true
+
+[config]
+location = ""  # Empty = auto-detect. Set to "San Francisco" etc.
+units = "imperial"  # "metric" or "imperial"
+
+[[data_sources]]
+id = "current_weather"
+label = "Current Weather"
+source_type = "http"
+
+[data_sources.source_config]
+url = "https://wttr.in/?format=%C+%t+%h+%w&m"
+refresh_seconds = 1800
+fallback = "Weather unavailable"
+
+[[data_sources]]
+id = "weather_forecast"
+label = "Today's Forecast"
+source_type = "http"
+
+[data_sources.source_config]
+url = "https://wttr.in/?format=%C+High:%t+Wind:%w&m"
+refresh_seconds = 3600
+fallback = "Forecast unavailable"
+
+[[blocks]]
+block_type = "weather"
+description = "Ambient weather display — temperature, conditions, and contextual suggestions"
+
+[blocks.schema]
+type = "object"
+
+[blocks.schema.properties.temperature]
+type = "string"
+
+[blocks.schema.properties.conditions]
+type = "string"
+
+[blocks.schema.properties.suggestion]
+type = "string"

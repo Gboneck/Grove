@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod autonomous;
 pub mod context;
+pub mod enrichment;
 pub mod identity;
 pub mod logs;
 pub mod mcp;
@@ -11,6 +12,7 @@ pub mod reflection;
 pub mod setup;
 pub mod soul;
 pub mod system;
+pub mod vector;
 pub mod ventures;
 pub mod roles;
 pub mod watch;

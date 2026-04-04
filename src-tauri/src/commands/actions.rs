@@ -132,15 +132,26 @@ pub async fn execute_action(
             })
         }
         "reason" => {
-            // Feed output back as reasoning input — handled by frontend
-            let text = params
-                .and_then(|p| p.get("text").and_then(|t| t.as_str().map(String::from)))
+            // Build a prompt from the action config + params and feed back to reasoning
+            let prompt = action
+                .executor_config
+                .get("prompt")
+                .and_then(|p| p.as_str())
+                .map(String::from)
                 .unwrap_or_else(|| action.label.clone());
+
+            let user_text = params
+                .and_then(|p| p.get("text").and_then(|t| t.as_str().map(String::from)));
+
+            let full_prompt = match user_text {
+                Some(text) => format!("{}\n\nUser context: {}", prompt, text),
+                None => prompt,
+            };
 
             Ok(ActionResult {
                 success: true,
                 message: "Feeding back to reasoning engine".to_string(),
-                output: Some(text),
+                output: Some(full_prompt),
             })
         }
         other => Err(format!("Unknown executor type: {}", other)),

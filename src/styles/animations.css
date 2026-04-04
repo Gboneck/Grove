@@ -113,3 +113,41 @@
 .animate-block-enter {
   animation: block-enter 500ms ease-out forwards;
 }
+
+/* Staggered block entrance — used by BlockRenderer for sequential fade-in */
+@keyframes block-stagger {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-block-stagger {
+  animation: block-stagger 400ms ease-out forwards;
+  opacity: 0;
+}
+
+/* Skeleton shimmer effect for loading placeholders */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}

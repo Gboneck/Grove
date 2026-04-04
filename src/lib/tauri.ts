@@ -151,9 +151,9 @@ export async function listActions(): Promise<ActionDef[]> {
 // Memory stats
 export interface MemoryStats {
   total_sessions: number;
-  total_facts: number;
-  total_patterns: number;
-  total_insights: number;
+  facts_count: number;
+  patterns_count: number;
+  insights_count: number;
 }
 
 export async function getMemoryStats(): Promise<MemoryStats> {
@@ -231,4 +231,49 @@ export async function reasonStream(userInput?: string): Promise<ReasonResponse> 
   return invoke<ReasonResponse>("reason_stream", {
     userInput: userInput || null,
   });
+}
+
+// Vector memory (Qdrant)
+export interface VectorStatus {
+  available: boolean;
+  url: string;
+  collection: string;
+}
+
+export async function vectorStatus(): Promise<VectorStatus> {
+  return invoke<VectorStatus>("vector_status");
+}
+
+export async function vectorSync(): Promise<{ synced: number }> {
+  return invoke<{ synced: number }>("vector_sync");
+}
+
+export interface VectorSearchResult {
+  content: string;
+  category: string;
+  confidence: number;
+  score: number;
+}
+
+export async function vectorSearch(
+  query: string,
+  limit?: number
+): Promise<VectorSearchResult[]> {
+  return invoke<VectorSearchResult[]>("vector_search", {
+    query,
+    limit: limit || null,
+  });
+}
+
+// Soul enrichment prompts
+export async function getEnrichmentPrompts(): Promise<Block[]> {
+  return invoke<Block[]>("get_enrichment_prompts");
+}
+
+// Answer an enrichment prompt (patches Soul.md directly)
+export async function answerEnrichment(
+  section: string,
+  answer: string
+): Promise<string> {
+  return invoke<string>("answer_enrichment", { section, answer });
 }

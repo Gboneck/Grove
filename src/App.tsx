@@ -14,11 +14,14 @@ import SearchPanel from "./components/panels/SearchPanel";
 import CommandPalette from "./components/CommandPalette";
 import ActionLog from "./components/ActionLog";
 import DigestPanel from "./components/panels/DigestPanel";
+import EvolutionPanel from "./components/panels/EvolutionPanel";
+import OfflineFallback from "./components/OfflineFallback";
 import {
   reasonStream,
   checkSetup,
   getFileStamps,
   clearConversation,
+  getEnrichmentPrompts,
   Block,
   SetupStatus,
   FileStamps,
@@ -66,6 +69,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [digestOpen, setDigestOpen] = useState(false);
+  const [evolutionOpen, setEvolutionOpen] = useState(false);
   const [autoActions, setAutoActions] = useState<string[]>([]);
   const [ventureUpdates, setVentureUpdates] = useState<string[]>([]);
   const [hasPeriodicUpdate, setHasPeriodicUpdate] = useState(false);
@@ -116,6 +120,15 @@ export default function App() {
 
       // Use the final authoritative response (may have all blocks if streaming didn't emit)
       if (response.blocks && Array.isArray(response.blocks)) {
+        // Append enrichment prompts if in early phases
+        try {
+          const enrichment = await getEnrichmentPrompts();
+          if (enrichment.length > 0) {
+            response.blocks.push(...enrichment);
+          }
+        } catch {
+          // Enrichment is optional — ignore errors
+        }
         setBlocks(response.blocks);
         setLastUpdated(new Date());
         setModelSource(response.model_source);
@@ -201,6 +214,7 @@ export default function App() {
     { id: "plugins", label: "Manage Plugins", action: () => setPluginsOpen(true) },
     { id: "profiles", label: "Switch Profile", action: () => setProfilesOpen(true) },
     { id: "digest", label: "Weekly Digest", action: () => setDigestOpen(true) },
+    { id: "evolution", label: "Soul Evolution", action: () => setEvolutionOpen(true) },
   ];
 
   // Poll ~/.grove/ files for external changes every 10s
@@ -283,7 +297,11 @@ export default function App() {
         themeHint={themeHint}
       >
         <div className={error ? "opacity-70" : ""}>
-          <BlockRenderer blocks={blocks} onInput={handleInput} />
+          {error && blocks === FALLBACK_BLOCKS ? (
+            <OfflineFallback />
+          ) : (
+            <BlockRenderer blocks={blocks} onInput={handleInput} isLoading={isLoading} />
+          )}
         </div>
         {isLoading && blocks.length === 0 && <LoadingState />}
         {isLoading && blocks.length > 0 && (
@@ -329,6 +347,10 @@ export default function App() {
       <DigestPanel
         isOpen={digestOpen}
         onClose={() => setDigestOpen(false)}
+      />
+      <EvolutionPanel
+        isOpen={evolutionOpen}
+        onClose={() => setEvolutionOpen(false)}
       />
       <CommandPalette
         isOpen={paletteOpen}
