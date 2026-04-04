@@ -12,4 +12,5 @@ pub mod setup;
 pub mod soul;
 pub mod system;
 pub mod ventures;
+pub mod roles;
 pub mod watch;

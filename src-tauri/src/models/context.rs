@@ -35,6 +35,8 @@ pub struct GroveContext {
     pub working_memory: String,
     /// Long-term patterns context
     pub longterm_context: String,
+    /// Active role prompt modifier (from YAML role config)
+    pub role_prompt: String,
 }
 
 impl GroveContext {
@@ -197,6 +199,7 @@ impl GroveContext {
             soul_gaps,
             working_memory,
             longterm_context,
+            role_prompt: String::new(), // Filled by caller when a role is active
         })
     }
 

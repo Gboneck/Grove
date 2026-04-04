@@ -23,6 +23,7 @@ use commands::{
         clear_conversation, get_model_status, reason, reason_stream, set_model_mode,
         ConversationState, RouterState,
     },
+    roles::{list_roles, get_active_role, set_active_role},
     setup::{check_setup, save_api_key},
     soul::{read_soul, write_soul},
     system::get_system_info,
@@ -39,6 +40,9 @@ use memory::ephemeral::EphemeralMemory;
 
 /// Shared ephemeral memory state for the current session.
 pub struct EphemeralState(pub Arc<Mutex<EphemeralMemory>>);
+
+/// Active reasoning role state (e.g., "builder", "reflector").
+pub struct RoleState(pub Arc<Mutex<Option<String>>>);
 
 /// Shared heartbeat state.
 pub struct HeartbeatStateWrapper(pub Arc<heartbeat::HeartbeatState>);
@@ -90,12 +94,16 @@ pub fn run() {
     // Initialize ephemeral memory for this session
     let ephemeral_state = EphemeralState(Arc::new(Mutex::new(EphemeralMemory::new())));
 
+    // Initialize role state (no active role by default)
+    let role_state = RoleState(Arc::new(Mutex::new(None)));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(router_state)
         .manage(plugin_state)
         .manage(conversation_state)
         .manage(ephemeral_state)
+        .manage(role_state)
         .setup(move |app| {
             // Start the heartbeat background loop
             let grove_dir = dirs::home_dir()
@@ -227,6 +235,9 @@ pub fn run() {
             mcp_call_tool,
             get_weekly_digest,
             generate_and_save_digest,
+            list_roles,
+            get_active_role,
+            set_active_role,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

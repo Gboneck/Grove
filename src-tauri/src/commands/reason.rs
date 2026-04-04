@@ -9,12 +9,16 @@ use super::autonomous;
 use super::logs::{write_reasoning_log, LogEntry};
 use super::memory;
 use super::reflection;
+use super::roles;
 use super::ventures;
 use crate::memory::working;
 use crate::commands::actions::PluginState;
 use crate::models::context::GroveContext;
 use crate::models::router::{ModelRouter, ModelStatus};
 use crate::models::{ModelSource, ReasoningIntent};
+use crate::soul::parser::Soul;
+use crate::soul::evolution::RelationshipPhase;
+use crate::autonomy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationTurn {
@@ -48,6 +52,7 @@ pub async fn reason(
     state: tauri::State<'_, RouterState>,
     conversation: tauri::State<'_, ConversationState>,
     plugin_state: tauri::State<'_, PluginState>,
+    role_state: tauri::State<'_, crate::RoleState>,
 ) -> Result<ReasonResponse, String> {
     let start = Instant::now();
 
@@ -69,6 +74,16 @@ pub async fn reason(
         let digest_ctx = reflection::digest_context();
         let reminders_ctx = reflection::reminders_context();
         context.plugin_data = format!("{}{}{}{}", plugin_data, actions_ctx, digest_ctx, reminders_ctx);
+    }
+
+    // Inject active role prompt
+    {
+        let active_role = role_state.0.lock().await;
+        if let Some(ref role_name) = *active_role {
+            if let Some(role) = roles::get_role(role_name) {
+                context.role_prompt = roles::role_prompt_modifier(&role);
+            }
+        }
     }
 
     // Generate weekly digest if needed (runs once per week)
@@ -179,6 +194,15 @@ pub async fn reason(
         &insights,
     ).ok();
 
+    // 5c. Auto-patch soul.md from model insights
+    if !insights.is_empty() {
+        match crate::soul::autopatch::auto_patch_soul(&insights) {
+            Ok(0) => {} // No patches needed
+            Ok(n) => eprintln!("[grove] Auto-patched soul.md with {} insight(s)", n),
+            Err(e) => eprintln!("[grove] Soul auto-patch error: {}", e),
+        }
+    }
+
     // 6. Write reasoning log
     let log_entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),
@@ -193,9 +217,28 @@ pub async fn reason(
     };
     write_reasoning_log(&log_entry);
 
-    // 7. Execute autonomous actions from the model
+    // 7. Execute autonomous actions through autonomy gate
     let auto_action_results = if let Some(ref actions) = output.auto_actions {
-        let results = autonomous::execute_auto_actions(actions);
+        // Determine relationship phase for autonomy gating
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem = memory::read_memory_file().unwrap_or_default();
+        let phase = RelationshipPhase::from_metrics(
+            soul.completeness(),
+            mem.sessions.len() as u32,
+        );
+
+        let (approved, blocked) = autonomy::gate_actions(actions, phase);
+        for b in &blocked {
+            eprintln!("[grove:autonomy] {}", b);
+        }
+
+        let mut results = autonomous::execute_auto_actions(&approved);
+        for b in blocked {
+            results.push(b);
+        }
         for result in &results {
             eprintln!("[grove] Auto-action: {}", result);
         }
@@ -242,6 +285,7 @@ pub async fn reason_stream(
     state: tauri::State<'_, RouterState>,
     conversation: tauri::State<'_, ConversationState>,
     plugin_state: tauri::State<'_, PluginState>,
+    role_state: tauri::State<'_, crate::RoleState>,
 ) -> Result<ReasonResponse, String> {
     use tauri::Emitter;
 
@@ -265,6 +309,16 @@ pub async fn reason_stream(
         let digest_ctx = reflection::digest_context();
         let reminders_ctx = reflection::reminders_context();
         context.plugin_data = format!("{}{}{}{}", plugin_data, actions_ctx, digest_ctx, reminders_ctx);
+    }
+
+    // Inject active role prompt
+    {
+        let active_role = role_state.0.lock().await;
+        if let Some(ref role_name) = *active_role {
+            if let Some(role) = roles::get_role(role_name) {
+                context.role_prompt = roles::role_prompt_modifier(&role);
+            }
+        }
     }
 
     // 2. Classify intent
@@ -372,6 +426,15 @@ pub async fn reason_stream(
         &insights,
     ).ok();
 
+    // Auto-patch soul.md from model insights
+    if !insights.is_empty() {
+        match crate::soul::autopatch::auto_patch_soul(&insights) {
+            Ok(0) => {}
+            Ok(n) => eprintln!("[grove] Auto-patched soul.md with {} insight(s)", n),
+            Err(e) => eprintln!("[grove] Soul auto-patch error: {}", e),
+        }
+    }
+
     let log_entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),
         model_source: source_str.to_string(),
@@ -385,12 +448,25 @@ pub async fn reason_stream(
     };
     write_reasoning_log(&log_entry);
 
-    // Execute autonomous actions
+    // Execute autonomous actions through autonomy gate
     let auto_action_results = if let Some(ref actions) = output.auto_actions {
-        let results = autonomous::execute_auto_actions(actions);
-        for result in &results {
-            eprintln!("[grove] Auto-action: {}", result);
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem = memory::read_memory_file().unwrap_or_default();
+        let phase = RelationshipPhase::from_metrics(
+            soul.completeness(),
+            mem.sessions.len() as u32,
+        );
+
+        let (approved, blocked) = autonomy::gate_actions(actions, phase);
+        for b in &blocked {
+            eprintln!("[grove:autonomy] {}", b);
         }
+
+        let mut results = autonomous::execute_auto_actions(&approved);
+        results.extend(blocked);
         results
     } else {
         Vec::new()
