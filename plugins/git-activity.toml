@@ -1,0 +1,56 @@
+# Git Activity Plugin — surfaces recent git commits as reasoning context.
+# Place in ~/.grove/plugins/git-activity.toml
+
+name = "git-activity"
+version = "0.1.0"
+description = "Tracks git activity across watched repositories and surfaces it during reasoning"
+enabled = true
+
+[[data_sources]]
+id = "git_recent_commits"
+label = "Recent Git Commits"
+source_type = "shell"
+
+[data_sources.source_config]
+command = "git log --oneline --since='7 days ago' -20 2>/dev/null || echo 'no git repo'"
+working_dir = "."
+refresh_seconds = 300
+
+[[data_sources]]
+id = "git_status"
+label = "Git Working Tree Status"
+source_type = "shell"
+
+[data_sources.source_config]
+command = "git status --short 2>/dev/null || echo 'no git repo'"
+working_dir = "."
+refresh_seconds = 60
+
+[[actions]]
+id = "git_commit_summary"
+label = "Summarize recent commits"
+description = "Generate a summary of git activity from the past week"
+executor = "reason"
+
+[actions.executor_config]
+prompt = "Summarize the user's recent git commits, noting patterns in what they've been working on"
+
+[[blocks]]
+block_type = "git_activity"
+description = "Displays recent git commits with branch and time info"
+
+[blocks.schema]
+type = "object"
+
+[blocks.schema.properties.commits]
+type = "array"
+
+[blocks.schema.properties.commits.items]
+type = "object"
+
+[blocks.schema.properties.branch]
+type = "string"
+
+[hooks]
+on_startup = "git fetch --all --quiet 2>/dev/null || true"
+on_file_change = "git status --short 2>/dev/null || true"

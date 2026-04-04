@@ -28,6 +28,7 @@ use commands::{
     setup::{check_setup, save_api_key},
     soul::{read_soul, write_soul},
     system::get_system_info,
+    vector::{vector_status, vector_sync, vector_search},
     watch::{get_file_stamps, notify_file_change},
 };
 use models::config;
@@ -242,6 +243,9 @@ pub fn run() {
             set_active_role,
             get_evolution_proposals,
             apply_evolution,
+            vector_status,
+            vector_sync,
+            vector_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

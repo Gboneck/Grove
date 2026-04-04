@@ -209,8 +209,195 @@ fn handle_tool_call(name: &str, args: &Value) -> Result<Value, String> {
                 "soul_sections": section_count,
             }))
         }
+        "grove_search" => {
+            let query = args
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing query")?;
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5) as usize;
+
+            // Try Qdrant first, fall back to keyword search on JSON facts
+            let qdrant_available = check_qdrant_available();
+
+            if qdrant_available {
+                // Use Qdrant vector search via HTTP
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_secs(3))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::blocking::Client::new());
+
+                // Generate simple vector from query
+                let vector = embed_text_for_search(query);
+                let body = serde_json::json!({
+                    "vector": vector,
+                    "limit": limit,
+                    "with_payload": true,
+                    "score_threshold": 0.3,
+                });
+
+                match client
+                    .post("http://localhost:6333/collections/grove_memory/points/search")
+                    .json(&body)
+                    .send()
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        let data: Value = resp.json().unwrap_or(json!({}));
+                        let results = data
+                            .get("result")
+                            .and_then(|r| r.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|item| {
+                                        let score = item.get("score")?.as_f64()?;
+                                        let payload = item.get("payload")?;
+                                        Some(json!({
+                                            "content": payload.get("content"),
+                                            "category": payload.get("category"),
+                                            "confidence": payload.get("confidence"),
+                                            "score": score,
+                                        }))
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        Ok(json!({
+                            "source": "qdrant",
+                            "results": results,
+                        }))
+                    }
+                    _ => keyword_search_fallback(query, limit),
+                }
+            } else {
+                keyword_search_fallback(query, limit)
+            }
+        }
         _ => Err(format!("Unknown tool: {}", name)),
     }
+}
+
+/// Check if Qdrant is reachable.
+fn check_qdrant_available() -> bool {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(1))
+        .build()
+        .ok()
+        .and_then(|c| c.get("http://localhost:6333/collections").send().ok())
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+/// Keyword-based fallback search across JSON facts and long-term memory.
+fn keyword_search_fallback(query: &str, limit: usize) -> Result<Value, String> {
+    let dir = grove_dir();
+    let mem_raw = std::fs::read_to_string(dir.join("memory.json")).unwrap_or_default();
+    let mem: Value = serde_json::from_str(&mem_raw).unwrap_or(json!({}));
+
+    let query_lower = query.to_lowercase();
+    let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+
+    let mut results: Vec<Value> = Vec::new();
+
+    // Search facts
+    if let Some(facts) = mem.get("facts").and_then(|f| f.as_array()) {
+        for fact in facts {
+            let content = fact.get("content").and_then(|c| c.as_str()).unwrap_or("");
+            let score = keyword_score(content, &query_words);
+            if score > 0.0 {
+                results.push(json!({
+                    "content": content,
+                    "category": fact.get("category"),
+                    "confidence": fact.get("confidence"),
+                    "score": score,
+                }));
+            }
+        }
+    }
+
+    // Search long-term entries
+    let lt_path = dir.join("memory").join("longterm").join("entries.json");
+    if let Ok(lt_raw) = std::fs::read_to_string(&lt_path) {
+        if let Ok(entries) = serde_json::from_str::<Vec<Value>>(&lt_raw) {
+            for entry in &entries {
+                let content = entry.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                let score = keyword_score(content, &query_words);
+                if score > 0.0 {
+                    results.push(json!({
+                        "content": content,
+                        "category": entry.get("category"),
+                        "confidence": entry.get("confidence"),
+                        "score": score,
+                    }));
+                }
+            }
+        }
+    }
+
+    results.sort_by(|a, b| {
+        b.get("score")
+            .and_then(|s| s.as_f64())
+            .unwrap_or(0.0)
+            .partial_cmp(&a.get("score").and_then(|s| s.as_f64()).unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    results.truncate(limit);
+
+    Ok(json!({
+        "source": "keyword",
+        "results": results,
+    }))
+}
+
+/// Simple keyword scoring: fraction of query words found in content.
+fn keyword_score(content: &str, query_words: &[&str]) -> f64 {
+    if query_words.is_empty() {
+        return 0.0;
+    }
+    let lower = content.to_lowercase();
+    let matches = query_words.iter().filter(|w| lower.contains(**w)).count();
+    matches as f64 / query_words.len() as f64
+}
+
+/// Lightweight embedding for MCP search (mirrors vector.rs logic).
+fn embed_text_for_search(text: &str) -> Vec<f64> {
+    let lower = text.to_lowercase();
+    let dim = 128;
+    let mut vector = vec![0.0f64; dim];
+
+    let chars: Vec<char> = lower.chars().collect();
+    for window in chars.windows(3) {
+        let s: String = window.iter().collect();
+        let hash = fnv_hash(&s);
+        let idx = (hash as usize) % dim;
+        vector[idx] += 1.0;
+    }
+
+    for word in lower.split_whitespace() {
+        if word.len() > 2 {
+            let hash = fnv_hash(word);
+            let idx = (hash as usize) % dim;
+            vector[idx] += 2.0;
+        }
+    }
+
+    let magnitude: f64 = vector.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if magnitude > 0.0 {
+        for v in &mut vector {
+            *v /= magnitude;
+        }
+    }
+    vector
+}
+
+fn fnv_hash(s: &str) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in s.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn tools_list() -> Value {
@@ -282,6 +469,18 @@ fn tools_list() -> Value {
                 "name": "grove_get_focus",
                 "description": "Get current focus state: soul completeness, session count, fact count",
                 "inputSchema": { "type": "object", "properties": {}, "required": [] }
+            },
+            {
+                "name": "grove_search",
+                "description": "Semantic search across Grove's memory — facts, patterns, and long-term knowledge. Uses Qdrant vector search when available, falls back to keyword matching.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Natural language search query" },
+                        "limit": { "type": "number", "description": "Max results (default 5)" }
+                    },
+                    "required": ["query"]
+                }
             }
         ]
     })

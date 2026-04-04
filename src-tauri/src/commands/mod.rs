@@ -11,6 +11,7 @@ pub mod reflection;
 pub mod setup;
 pub mod soul;
 pub mod system;
+pub mod vector;
 pub mod ventures;
 pub mod roles;
 pub mod watch;

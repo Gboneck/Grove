@@ -11,10 +11,12 @@ import Divider from "./blocks/Divider";
 import ProgressBlock from "./blocks/ProgressBlock";
 import ListBlock from "./blocks/ListBlock";
 import QuoteBlock from "./blocks/QuoteBlock";
+import SkeletonBlock from "./SkeletonBlock";
 
 interface BlockRendererProps {
   blocks: Block[];
   onInput: (value: string) => void;
+  isLoading?: boolean;
 }
 
 function BlockWrapper({
@@ -22,11 +24,13 @@ function BlockWrapper({
   children,
   dismissable = true,
   animate = false,
+  staggerDelay,
 }: {
   blockType: string;
   children: React.ReactNode;
   dismissable?: boolean;
   animate?: boolean;
+  staggerDelay?: string;
 }) {
   const [dismissed, setDismissed] = useState(false);
   const [visible, setVisible] = useState(!animate);
@@ -34,10 +38,14 @@ function BlockWrapper({
 
   useEffect(() => {
     if (animate) {
-      // Trigger fade-in on next frame
+      if (staggerDelay) {
+        const ms = parseInt(staggerDelay, 10) || 0;
+        const timer = setTimeout(() => setVisible(true), ms);
+        return () => clearTimeout(timer);
+      }
       requestAnimationFrame(() => setVisible(true));
     }
-  }, [animate]);
+  }, [animate, staggerDelay]);
 
   const handleDismiss = useCallback(() => {
     setDismissed(true);
@@ -67,7 +75,7 @@ function BlockWrapper({
   );
 }
 
-function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
+function BlockRenderer({ blocks, onInput, isLoading }: BlockRendererProps) {
   // Track the previous block count to know which are newly streamed
   const prevCountRef = useRef(0);
   const isStreaming = blocks.length !== prevCountRef.current;
@@ -80,10 +88,12 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
       {blocks.map((block, i) => {
         const key = `${block.type}-${i}`;
         const isNew = isStreaming && i >= prevCountRef.current;
+        // Stagger entrance animation: each new block delays by 80ms
+        const staggerDelay = isNew ? `${(i - prevCountRef.current) * 80}ms` : undefined;
         switch (block.type) {
           case "text":
             return (
-              <BlockWrapper key={key} blockType="text" animate={isNew}>
+              <BlockWrapper key={key} blockType="text" animate={isNew} staggerDelay={staggerDelay}>
                 <TextBlock
                   heading={block.heading as string}
                   body={block.body as string}
@@ -92,7 +102,7 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "metric":
             return (
-              <BlockWrapper key={key} blockType="metric" animate={isNew}>
+              <BlockWrapper key={key} blockType="metric" animate={isNew} staggerDelay={staggerDelay}>
                 <MetricCard
                   label={block.label as string}
                   value={block.value as string}
@@ -102,7 +112,7 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "actions":
             return (
-              <BlockWrapper key={key} blockType="actions" dismissable={false} animate={isNew}>
+              <BlockWrapper key={key} blockType="actions" dismissable={false} animate={isNew} staggerDelay={staggerDelay}>
                 <ActionList
                   title={block.title as string}
                   items={block.items as { action: string; detail: string }[]}
@@ -112,7 +122,7 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "status":
             return (
-              <BlockWrapper key={key} blockType="status" animate={isNew}>
+              <BlockWrapper key={key} blockType="status" animate={isNew} staggerDelay={staggerDelay}>
                 <StatusRow
                   items={
                     block.items as {
@@ -126,7 +136,7 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "insight":
             return (
-              <BlockWrapper key={key} blockType="insight" animate={isNew}>
+              <BlockWrapper key={key} blockType="insight" animate={isNew} staggerDelay={staggerDelay}>
                 <InsightBlock
                   icon={
                     block.icon as "alert" | "opportunity" | "warning" | "idea"
@@ -137,7 +147,7 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "input":
             return (
-              <BlockWrapper key={key} blockType="input" dismissable={false} animate={isNew}>
+              <BlockWrapper key={key} blockType="input" dismissable={false} animate={isNew} staggerDelay={staggerDelay}>
                 <InputPrompt
                   prompt={block.prompt as string}
                   placeholder={block.placeholder as string}
@@ -149,7 +159,7 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             return <Divider key={key} />;
           case "progress":
             return (
-              <BlockWrapper key={key} blockType="progress" animate={isNew}>
+              <BlockWrapper key={key} blockType="progress" animate={isNew} staggerDelay={staggerDelay}>
                 <ProgressBlock
                   label={block.label as string}
                   value={block.value as number}
@@ -160,7 +170,7 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "list":
             return (
-              <BlockWrapper key={key} blockType="list" animate={isNew}>
+              <BlockWrapper key={key} blockType="list" animate={isNew} staggerDelay={staggerDelay}>
                 <ListBlock
                   heading={block.heading as string | undefined}
                   items={block.items as string[]}
@@ -170,7 +180,7 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             );
           case "quote":
             return (
-              <BlockWrapper key={key} blockType="quote" animate={isNew}>
+              <BlockWrapper key={key} blockType="quote" animate={isNew} staggerDelay={staggerDelay}>
                 <QuoteBlock
                   text={block.text as string}
                   attribution={block.attribution as string | undefined}
@@ -181,6 +191,14 @@ function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
             return null;
         }
       })}
+      {/* Skeleton placeholders while model is generating */}
+      {isLoading && blocks.length === 0 && (
+        <>
+          <SkeletonBlock variant="text" />
+          <SkeletonBlock variant="metric" />
+          <SkeletonBlock variant="status" />
+        </>
+      )}
     </div>
   );
 }

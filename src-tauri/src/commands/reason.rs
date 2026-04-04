@@ -92,6 +92,20 @@ pub async fn reason(
         }
     }
 
+    // Inject soul enrichment prompts for early phases
+    {
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem = memory::read_memory_file().unwrap_or_default();
+        let phase = RelationshipPhase::from_metrics(soul.completeness(), mem.sessions.len() as u32);
+        let enrichment = crate::soul::enrichment::enrichment_context(&soul, phase);
+        if !enrichment.is_empty() {
+            context.plugin_data.push_str(&enrichment);
+        }
+    }
+
     // Generate weekly digest if needed (runs once per week)
     if reflection::should_generate_digest() {
         if let Ok(digest) = reflection::generate_weekly_digest() {
@@ -222,6 +236,13 @@ pub async fn reason(
         }
     }
 
+    // 5d. Sync to Qdrant if available (non-blocking)
+    tokio::spawn(async {
+        if crate::memory::vector::is_available().await {
+            crate::memory::vector::sync_from_json().await.ok();
+        }
+    });
+
     // 6. Write reasoning log
     let log_entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),
@@ -343,6 +364,20 @@ pub async fn reason_stream(
             if let Some(role) = roles::get_role(role_name) {
                 context.role_prompt = roles::role_prompt_modifier(&role);
             }
+        }
+    }
+
+    // Inject soul enrichment prompts for early phases
+    {
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem = memory::read_memory_file().unwrap_or_default();
+        let phase = RelationshipPhase::from_metrics(soul.completeness(), mem.sessions.len() as u32);
+        let enrichment = crate::soul::enrichment::enrichment_context(&soul, phase);
+        if !enrichment.is_empty() {
+            context.plugin_data.push_str(&enrichment);
         }
     }
 
@@ -472,6 +507,13 @@ pub async fn reason_stream(
             Err(e) => eprintln!("[grove:evolve] Error: {}", e),
         }
     }
+
+    // Sync to Qdrant if available (non-blocking)
+    tokio::spawn(async {
+        if crate::memory::vector::is_available().await {
+            crate::memory::vector::sync_from_json().await.ok();
+        }
+    });
 
     let log_entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),

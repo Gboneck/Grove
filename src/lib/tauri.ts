@@ -232,3 +232,35 @@ export async function reasonStream(userInput?: string): Promise<ReasonResponse> 
     userInput: userInput || null,
   });
 }
+
+// Vector memory (Qdrant)
+export interface VectorStatus {
+  available: boolean;
+  url: string;
+  collection: string;
+}
+
+export async function vectorStatus(): Promise<VectorStatus> {
+  return invoke<VectorStatus>("vector_status");
+}
+
+export async function vectorSync(): Promise<{ synced: number }> {
+  return invoke<{ synced: number }>("vector_sync");
+}
+
+export interface VectorSearchResult {
+  content: string;
+  category: string;
+  confidence: number;
+  score: number;
+}
+
+export async function vectorSearch(
+  query: string,
+  limit?: number
+): Promise<VectorSearchResult[]> {
+  return invoke<VectorSearchResult[]>("vector_search", {
+    query,
+    limit: limit || null,
+  });
+}
