@@ -1,0 +1,39 @@
+mod commands;
+
+use commands::{
+    context::{read_context, write_context},
+    memory::get_memory,
+    reason::reason,
+    soul::{read_soul, write_soul},
+    system::get_system_info,
+};
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    // Initialize ~/.grove/ directory and default files
+    commands::soul::ensure_grove_dir();
+    commands::soul::ensure_soul();
+    commands::context::ensure_context();
+    commands::memory::ensure_memory();
+
+    // Load .env from ~/.grove/.env if it exists
+    let grove_env = dirs::home_dir()
+        .map(|h| h.join(".grove").join(".env"))
+        .unwrap_or_default();
+    if grove_env.exists() {
+        dotenvy::from_path(&grove_env).ok();
+    }
+
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            reason,
+            read_soul,
+            write_soul,
+            read_context,
+            write_context,
+            get_memory,
+            get_system_info,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
