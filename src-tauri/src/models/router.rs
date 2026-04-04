@@ -126,7 +126,9 @@ impl ModelRouter {
         context: &GroveContext,
         intent: &ReasoningIntent,
     ) -> Result<ReasoningOutput, ModelError> {
-        let system_prompt = gemma::system_prompt();
+        let base_prompt = gemma::system_prompt();
+        let system_prompt_owned = format!("{}\n\n{}", context.phase_prompt, base_prompt);
+        let system_prompt: &str = &system_prompt_owned;
         let user_message = context.to_user_message();
 
         match &self.mode {
@@ -214,7 +216,9 @@ impl ModelRouter {
     where
         F: FnMut(Value) + Send,
     {
-        let system_prompt = gemma::system_prompt();
+        let base_prompt = gemma::system_prompt();
+        let system_prompt_owned = format!("{}\n\n{}", context.phase_prompt, base_prompt);
+        let system_prompt: &str = &system_prompt_owned;
         let user_message = context.to_user_message();
 
         match &self.mode {

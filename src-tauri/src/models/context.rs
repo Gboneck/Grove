@@ -2,6 +2,8 @@ use chrono::Local;
 use serde::Serialize;
 
 use crate::commands::memory;
+use crate::soul::parser::Soul;
+use crate::soul::evolution::RelationshipPhase;
 
 /// All context assembled for the reasoning engine
 #[derive(Debug, Clone, Serialize)]
@@ -19,6 +21,14 @@ pub struct GroveContext {
     pub date: String,
     pub last_seen: String,
     pub user_input: Option<String>,
+    /// Structured soul data (parsed from soul.md)
+    pub soul_completeness: f64,
+    /// Current relationship phase with the user
+    pub relationship_phase: String,
+    /// Phase-specific system prompt modifier
+    pub phase_prompt: String,
+    /// Weak soul sections that need enrichment
+    pub soul_gaps: Vec<String>,
 }
 
 impl GroveContext {
@@ -135,6 +145,17 @@ impl GroveContext {
             .last_seen
             .unwrap_or_else(|| "never — this is the first session".to_string());
 
+        // Parse soul.md into structured sections
+        let soul = Soul::parse(&soul_md);
+        let soul_completeness = soul.completeness();
+        let session_count = memory_data.sessions.len() as u32;
+        let phase = RelationshipPhase::from_metrics(soul_completeness, session_count);
+        let soul_gaps: Vec<String> = soul
+            .weak_sections(0.5)
+            .iter()
+            .map(|s| s.heading.clone())
+            .collect();
+
         let now = Local::now();
 
         Ok(GroveContext {
@@ -151,17 +172,35 @@ impl GroveContext {
             date: now.format("%B %-d, %Y").to_string(),
             last_seen,
             user_input,
+            soul_completeness,
+            relationship_phase: phase.display_name().to_string(),
+            phase_prompt: phase.system_prompt_modifier().to_string(),
+            soul_gaps,
         })
     }
 
     /// Build the user message sent to the model
     pub fn to_user_message(&self) -> String {
+        let soul_meta = format!(
+            "Soul completeness: {:.0}% | Relationship phase: {} | Gaps: {}",
+            self.soul_completeness * 100.0,
+            self.relationship_phase,
+            if self.soul_gaps.is_empty() {
+                "none".to_string()
+            } else {
+                self.soul_gaps.join(", ")
+            }
+        );
+
         format!(
             r#"Current time: {}
 Day: {}, {}
 Time since last session: {}
 
 --- SOUL.MD ---
+{}
+
+--- SOUL METADATA ---
 {}
 
 --- ACTIVE CONTEXT ---
@@ -182,6 +221,7 @@ Decide what to show. Return JSON only."#,
             self.date,
             self.last_seen,
             self.soul_md,
+            soul_meta,
             self.context_json,
             self.recent_memory,
             self.accumulated_insights,
