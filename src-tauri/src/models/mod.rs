@@ -25,12 +25,10 @@ pub enum ReasoningIntent {
 }
 
 impl ReasoningIntent {
-    /// Fast-path intents that Gemma should handle by default
     pub fn is_fast_path(&self) -> bool {
         matches!(self, ReasoningIntent::ComposeUI | ReasoningIntent::Reflect)
     }
 
-    /// Complex intents that should go straight to Claude
     pub fn requires_deep_reasoning(&self) -> bool {
         matches!(self, ReasoningIntent::PlanAction)
     }
@@ -46,6 +44,8 @@ pub struct ReasoningOutput {
     pub session_summary: Option<String>,
     pub insights: Option<Vec<String>>,
     pub source: ModelSource,
+    pub ambient_mood: Option<String>,
+    pub ambient_theme: Option<String>,
 }
 
 /// Raw JSON shape returned by the reasoning models
@@ -62,6 +62,14 @@ pub struct RawReasoningResponse {
     pub session_summary: Option<String>,
     #[serde(default)]
     pub insights: Option<Vec<String>>,
+    #[serde(default)]
+    pub ambient_state: Option<AmbientState>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AmbientState {
+    pub mood: Option<String>,
+    pub theme_hint: Option<String>,
 }
 
 fn default_confidence() -> f64 {
@@ -70,6 +78,10 @@ fn default_confidence() -> f64 {
 
 impl RawReasoningResponse {
     pub fn into_output(self, source: ModelSource) -> ReasoningOutput {
+        let (mood, theme) = match self.ambient_state {
+            Some(ref a) => (a.mood.clone(), a.theme_hint.clone()),
+            None => (None, None),
+        };
         ReasoningOutput {
             blocks: self.blocks,
             confidence: self.confidence,
@@ -78,6 +90,8 @@ impl RawReasoningResponse {
             session_summary: self.session_summary,
             insights: self.insights,
             source,
+            ambient_mood: mood,
+            ambient_theme: theme,
         }
     }
 }

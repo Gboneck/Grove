@@ -4,17 +4,38 @@ import ModelIndicator from "./ModelIndicator";
 interface GroveShellProps {
   children: ReactNode;
   onRefresh: () => void;
+  onOpenSoul: () => void;
   isLoading: boolean;
   lastUpdated: Date | null;
   modelSource: "local" | "cloud" | null;
+  ambientMood: string | null;
+  themeHint: string | null;
 }
+
+const THEME_CLASSES: Record<string, string> = {
+  warm: "bg-gradient-to-b from-[#0a0a0a] to-[#0f0a05]",
+  cool: "bg-gradient-to-b from-[#0a0a0a] to-[#050a0f]",
+  dark: "bg-[#0a0a0a]",
+  light: "bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]",
+};
+
+const ACCENT_OVERRIDES: Record<string, string> = {
+  urgent: "text-grove-status-red",
+  calm: "text-grove-accent",
+  creative: "text-[#c084fc]",
+  reflective: "text-[#60a5fa]",
+  focused: "text-grove-accent",
+};
 
 export default function GroveShell({
   children,
   onRefresh,
+  onOpenSoul,
   isLoading,
   lastUpdated,
   modelSource,
+  ambientMood,
+  themeHint,
 }: GroveShellProps) {
   const [time, setTime] = useState(new Date());
 
@@ -29,13 +50,19 @@ export default function GroveShell({
     hour12: true,
   });
 
+  const themeClass = THEME_CLASSES[themeHint || "dark"] || THEME_CLASSES.dark;
+  const accentClass =
+    ACCENT_OVERRIDES[ambientMood || "focused"] || "text-grove-accent";
+
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className={`min-h-screen flex flex-col transition-colors duration-1000 ${themeClass}`}>
       {/* Top bar */}
-      <header className="sticky top-0 z-10 bg-grove-bg/90 backdrop-blur-sm border-b border-grove-border">
+      <header className="sticky top-0 z-10 bg-grove-bg/80 backdrop-blur-md border-b border-grove-border">
         <div className="max-w-[640px] mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-grove-accent font-semibold tracking-wide font-display">
+            <span
+              className={`font-semibold tracking-wide font-display transition-colors duration-1000 ${accentClass}`}
+            >
               Grove
             </span>
             <span className="text-gray-600 text-sm">v0.2</span>
@@ -45,6 +72,13 @@ export default function GroveShell({
             <span className="text-sm text-grove-text-secondary font-mono">
               {timeStr}
             </span>
+            <button
+              onClick={onOpenSoul}
+              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
+              title="Edit Soul.md"
+            >
+              soul
+            </button>
             <button
               onClick={onRefresh}
               disabled={isLoading}
@@ -76,6 +110,9 @@ export default function GroveShell({
               <span className="ml-2">
                 via {modelSource === "local" ? "gemma" : "claude"}
               </span>
+            )}
+            {ambientMood && (
+              <span className="ml-2">· {ambientMood}</span>
             )}
           </p>
         </footer>

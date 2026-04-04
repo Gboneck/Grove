@@ -9,6 +9,8 @@ export interface ReasonResponse {
   blocks: Block[];
   timestamp: string;
   model_source: "local" | "cloud";
+  ambient_mood: string | null;
+  theme_hint: string | null;
 }
 
 export async function reason(userInput?: string): Promise<ReasonResponse> {
@@ -31,6 +33,26 @@ export async function getModelStatus(): Promise<ModelStatus> {
 
 export async function setModelMode(mode: "auto" | "local_only" | "cloud_only"): Promise<void> {
   return invoke<void>("set_model_mode", { mode });
+}
+
+export interface SetupStatus {
+  grove_dir_exists: boolean;
+  soul_md_exists: boolean;
+  soul_md_is_default: boolean;
+  api_key_set: boolean;
+  ollama_available: boolean;
+  needs_setup: boolean;
+  local_model: string;
+  system_ram_gb: number;
+  recommended_model: string;
+}
+
+export async function checkSetup(): Promise<SetupStatus> {
+  return invoke<SetupStatus>("check_setup");
+}
+
+export async function saveApiKey(key: string): Promise<void> {
+  return invoke<void>("save_api_key", { key });
 }
 
 export async function readSoul(): Promise<string> {
@@ -58,4 +80,16 @@ export interface SystemInfo {
 
 export async function getSystemInfo(): Promise<SystemInfo> {
   return invoke<SystemInfo>("get_system_info");
+}
+
+export async function getReasoningLogs(date?: string): Promise<unknown[]> {
+  return invoke<unknown[]>("get_reasoning_logs", { date: date || null });
+}
+
+export interface FileStamps {
+  files: Record<string, number>;
+}
+
+export async function getFileStamps(): Promise<FileStamps> {
+  return invoke<FileStamps>("get_file_stamps");
 }

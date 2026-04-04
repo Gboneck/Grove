@@ -40,6 +40,9 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
                 key={i}
                 title={block.title as string}
                 items={block.items as { action: string; detail: string }[]}
+                onAction={(action) =>
+                  onInput(`I want to: ${action}`)
+                }
               />
             );
           case "status":

@@ -6,9 +6,12 @@ use tokio::sync::Mutex;
 
 use commands::{
     context::{read_context, write_context},
+    logs::get_reasoning_logs,
     memory::get_memory,
     reason::{get_model_status, reason, set_model_mode, RouterState},
+    setup::{check_setup, save_api_key},
     soul::{read_soul, write_soul},
+    watch::get_file_stamps,
     system::get_system_info,
 };
 use models::config;
@@ -48,6 +51,10 @@ pub fn run() {
             write_context,
             get_memory,
             get_system_info,
+            check_setup,
+            save_api_key,
+            get_reasoning_logs,
+            get_file_stamps,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
