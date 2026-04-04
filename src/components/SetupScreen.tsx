@@ -1,12 +1,18 @@
 import { useState } from "react";
 import { saveApiKey, SetupStatus } from "../lib/tauri";
+import IdentityWizard from "./IdentityWizard";
 
 interface SetupScreenProps {
   status: SetupStatus;
   onComplete: () => void;
 }
 
+type SetupPhase = "identity" | "config";
+
 export default function SetupScreen({ status, onComplete }: SetupScreenProps) {
+  const [phase, setPhase] = useState<SetupPhase>(
+    status.soul_md_is_default ? "identity" : "config"
+  );
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -28,6 +34,12 @@ export default function SetupScreen({ status, onComplete }: SetupScreenProps) {
     }
   };
 
+  // Phase 1: Identity wizard for new users
+  if (phase === "identity") {
+    return <IdentityWizard onComplete={() => setPhase("config")} />;
+  }
+
+  // Phase 2: API key / model configuration
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
       <div className="max-w-md w-full space-y-8">
@@ -35,7 +47,7 @@ export default function SetupScreen({ status, onComplete }: SetupScreenProps) {
         <div className="text-center space-y-3">
           <h1 className="text-3xl font-display text-grove-accent">Grove</h1>
           <p className="text-grove-text-secondary text-sm">
-            Your personal operating system
+            Connect your reasoning engine
           </p>
         </div>
 
@@ -45,6 +57,13 @@ export default function SetupScreen({ status, onComplete }: SetupScreenProps) {
             <span className="w-2 h-2 rounded-full bg-grove-status-green" />
             <span className="text-grove-text-secondary">
               ~/.grove/ directory initialized
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3 text-sm">
+            <span className="w-2 h-2 rounded-full bg-grove-status-green" />
+            <span className="text-grove-text-secondary">
+              Identity configured
             </span>
           </div>
 

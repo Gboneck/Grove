@@ -1,17 +1,33 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import GroveShell from "./components/GroveShell";
 import BlockRenderer from "./components/BlockRenderer";
 import LoadingState from "./components/LoadingState";
 import SetupScreen from "./components/SetupScreen";
 import SoulEditor from "./components/SoulEditor";
+import MemoryPanel from "./components/panels/MemoryPanel";
+import LogsPanel from "./components/panels/LogsPanel";
+import PluginPanel from "./components/panels/PluginPanel";
+import ProfilePanel from "./components/panels/ProfilePanel";
+import ContextEditor from "./components/panels/ContextEditor";
+import SearchPanel from "./components/panels/SearchPanel";
+import CommandPalette from "./components/CommandPalette";
+import ActionLog from "./components/ActionLog";
+import DigestPanel from "./components/panels/DigestPanel";
 import {
-  reason as invokeReason,
+  reasonStream,
   checkSetup,
   getFileStamps,
+  clearConversation,
   Block,
   SetupStatus,
   FileStamps,
 } from "./lib/tauri";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  isPermissionGranted,
+  requestPermission,
+} from "@tauri-apps/plugin-notification";
 
 const FALLBACK_BLOCKS: Block[] = [
   {
@@ -42,6 +58,17 @@ export default function App() {
   const [ambientMood, setAmbientMood] = useState<string | null>(null);
   const [themeHint, setThemeHint] = useState<string | null>(null);
   const [soulEditorOpen, setSoulEditorOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [profilesOpen, setProfilesOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [digestOpen, setDigestOpen] = useState(false);
+  const [autoActions, setAutoActions] = useState<string[]>([]);
+  const [ventureUpdates, setVentureUpdates] = useState<string[]>([]);
+  const [hasPeriodicUpdate, setHasPeriodicUpdate] = useState(false);
   const lastStampsRef = useRef<FileStamps | null>(null);
 
   // Check setup on mount
@@ -59,19 +86,43 @@ export default function App() {
         // Can't check setup — just try to run
         setPhase("running");
       });
+
+    // Request notification permission on startup
+    isPermissionGranted().then((granted) => {
+      if (!granted) {
+        requestPermission().catch(() => {});
+      }
+    }).catch(() => {});
   }, []);
+
+  const streamingBlocksRef = useRef<Block[]>([]);
 
   const reason = useCallback(async (userInput?: string) => {
     setIsLoading(true);
     setError(false);
+    setBlocks([]); // Clear blocks for streaming
+    streamingBlocksRef.current = [];
+
+    // Listen for individual blocks as they stream in
+    let blockUnsub: (() => void) | null = null;
     try {
-      const response = await invokeReason(userInput);
+      blockUnsub = await listen<Block>("reason-block", (event) => {
+        streamingBlocksRef.current = [...streamingBlocksRef.current, event.payload];
+        setBlocks([...streamingBlocksRef.current]);
+      }).then(fn => { return fn; });
+
+      // This call returns when streaming is complete
+      const response = await reasonStream(userInput);
+
+      // Use the final authoritative response (may have all blocks if streaming didn't emit)
       if (response.blocks && Array.isArray(response.blocks)) {
         setBlocks(response.blocks);
         setLastUpdated(new Date());
         setModelSource(response.model_source);
         setAmbientMood(response.ambient_mood);
         setThemeHint(response.theme_hint);
+        setAutoActions(response.auto_action_results || []);
+        setVentureUpdates(response.venture_update_results || []);
       } else {
         throw new Error("Invalid response structure");
       }
@@ -82,6 +133,7 @@ export default function App() {
       setLastUpdated(new Date());
       setModelSource(null);
     } finally {
+      if (blockUnsub) blockUnsub();
       setIsLoading(false);
     }
   }, []);
@@ -92,6 +144,64 @@ export default function App() {
       reason();
     }
   }, [phase, reason]);
+
+  // Listen for periodic reasoning events from the background timer
+  useEffect(() => {
+    const unlisten = listen<{
+      blocks: Block[];
+      timestamp: string;
+      model_source: string;
+      ambient_mood: string | null;
+      theme_hint: string | null;
+      has_urgent: boolean;
+    }>("periodic-reasoning", (event) => {
+      const data = event.payload;
+      if (data.blocks && Array.isArray(data.blocks)) {
+        setBlocks(data.blocks);
+        setLastUpdated(new Date());
+        setModelSource(data.model_source as "local" | "cloud");
+        setAmbientMood(data.ambient_mood);
+        setThemeHint(data.theme_hint);
+        setHasPeriodicUpdate(true);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      } else if (meta && e.key === "/") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      } else if (e.key === "Escape") {
+        // Close any open panel
+        setPaletteOpen(false);
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Command palette commands
+  const paletteCommands = [
+    { id: "reason", label: "Refresh / Re-reason", shortcut: "R", action: () => { clearConversation().catch(() => {}); reason(); } },
+    { id: "search", label: "Search memory & logs", shortcut: "Ctrl+/", action: () => setSearchOpen(true) },
+    { id: "soul", label: "Edit Soul.md", action: () => setSoulEditorOpen(true) },
+    { id: "context", label: "Edit Context / Ventures", action: () => setContextOpen(true) },
+    { id: "memory", label: "View Memory", action: () => setMemoryOpen(true) },
+    { id: "logs", label: "View Reasoning Logs", action: () => setLogsOpen(true) },
+    { id: "plugins", label: "Manage Plugins", action: () => setPluginsOpen(true) },
+    { id: "profiles", label: "Switch Profile", action: () => setProfilesOpen(true) },
+    { id: "digest", label: "Weekly Digest", action: () => setDigestOpen(true) },
+  ];
 
   // Poll ~/.grove/ files for external changes every 10s
   useEffect(() => {
@@ -110,6 +220,8 @@ export default function App() {
           const prevTime = prev.files[file];
           if (prevTime !== undefined && prevTime !== mtime) {
             console.log(`[grove] ${file} changed externally, re-reasoning`);
+            // Notify backend for on_file_change hooks
+            invoke("notify_file_change").catch(() => {});
             reason();
             return;
           }
@@ -150,19 +262,34 @@ export default function App() {
   return (
     <>
       <GroveShell
-        onRefresh={() => reason()}
+        onRefresh={() => {
+          clearConversation().catch(() => {});
+          reason();
+        }}
         onOpenSoul={() => setSoulEditorOpen(true)}
+        onOpenMemory={() => setMemoryOpen(true)}
+        onOpenLogs={() => setLogsOpen(true)}
+        onOpenPlugins={() => setPluginsOpen(true)}
+        onOpenProfiles={() => setProfilesOpen(true)}
+        onOpenContext={() => setContextOpen(true)}
+        onOpenSearch={() => setSearchOpen(true)}
+        onInput={handleInput}
+        hasUpdate={hasPeriodicUpdate}
+        onAcknowledgeUpdate={() => setHasPeriodicUpdate(false)}
         isLoading={isLoading}
         lastUpdated={lastUpdated}
         modelSource={modelSource}
         ambientMood={ambientMood}
         themeHint={themeHint}
       >
-        {isLoading ? (
-          <LoadingState />
-        ) : (
-          <div className={error ? "opacity-70" : ""}>
-            <BlockRenderer blocks={blocks} onInput={handleInput} />
+        <div className={error ? "opacity-70" : ""}>
+          <BlockRenderer blocks={blocks} onInput={handleInput} />
+        </div>
+        {isLoading && blocks.length === 0 && <LoadingState />}
+        {isLoading && blocks.length > 0 && (
+          <div className="flex items-center gap-2 mt-4 text-sm text-grove-text-secondary animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-grove-accent" />
+            streaming...
           </div>
         )}
       </GroveShell>
@@ -170,6 +297,47 @@ export default function App() {
       <SoulEditor
         isOpen={soulEditorOpen}
         onClose={() => setSoulEditorOpen(false)}
+      />
+      <MemoryPanel
+        isOpen={memoryOpen}
+        onClose={() => setMemoryOpen(false)}
+      />
+      <LogsPanel
+        isOpen={logsOpen}
+        onClose={() => setLogsOpen(false)}
+      />
+      <PluginPanel
+        isOpen={pluginsOpen}
+        onClose={() => setPluginsOpen(false)}
+      />
+      <ProfilePanel
+        isOpen={profilesOpen}
+        onClose={() => setProfilesOpen(false)}
+        onSwitch={() => {
+          clearConversation().catch(() => {});
+          reason();
+        }}
+      />
+      <ContextEditor
+        isOpen={contextOpen}
+        onClose={() => setContextOpen(false)}
+      />
+      <SearchPanel
+        isOpen={searchOpen}
+        onClose={() => setSearchOpen(false)}
+      />
+      <DigestPanel
+        isOpen={digestOpen}
+        onClose={() => setDigestOpen(false)}
+      />
+      <CommandPalette
+        isOpen={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={paletteCommands}
+      />
+      <ActionLog
+        autoActions={autoActions}
+        ventureUpdates={ventureUpdates}
       />
     </>
   );

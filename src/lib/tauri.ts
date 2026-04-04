@@ -11,6 +11,9 @@ export interface ReasonResponse {
   model_source: "local" | "cloud";
   ambient_mood: string | null;
   theme_hint: string | null;
+  conversation_id: string;
+  auto_action_results: string[];
+  venture_update_results: string[];
 }
 
 export async function reason(userInput?: string): Promise<ReasonResponse> {
@@ -92,4 +95,96 @@ export interface FileStamps {
 
 export async function getFileStamps(): Promise<FileStamps> {
   return invoke<FileStamps>("get_file_stamps");
+}
+
+// Identity wizard
+export async function generateSoul(
+  name: string,
+  location: string | null,
+  role: string | null,
+  projects: string[],
+  priorities: string[],
+  workStyle: string | null
+): Promise<string> {
+  return invoke<string>("generate_soul", {
+    name,
+    location,
+    role,
+    projects,
+    priorities,
+    workStyle,
+  });
+}
+
+export async function isSoulPersonalized(): Promise<boolean> {
+  return invoke<boolean>("is_soul_personalized");
+}
+
+// Actions
+export interface ActionDef {
+  id: string;
+  label: string;
+  description: string;
+  executor: string;
+}
+
+export interface ActionResult {
+  success: boolean;
+  message: string;
+  output: string | null;
+}
+
+export async function executeAction(
+  actionId: string,
+  params?: Record<string, unknown>
+): Promise<ActionResult> {
+  return invoke<ActionResult>("execute_action", {
+    actionId,
+    params: params || null,
+  });
+}
+
+export async function listActions(): Promise<ActionDef[]> {
+  return invoke<ActionDef[]>("list_actions");
+}
+
+// Memory stats
+export interface MemoryStats {
+  total_sessions: number;
+  total_facts: number;
+  total_patterns: number;
+  total_insights: number;
+}
+
+export async function getMemoryStats(): Promise<MemoryStats> {
+  return invoke<MemoryStats>("get_memory_stats");
+}
+
+export async function recordActionEngagement(
+  blockType: string,
+  interacted: boolean
+): Promise<void> {
+  return invoke<void>("record_action_engagement", { blockType, interacted });
+}
+
+// Full memory (for viewer panel)
+export async function getFullMemory(): Promise<unknown> {
+  return invoke<unknown>("get_full_memory");
+}
+
+// Conversation management
+export async function clearConversation(): Promise<void> {
+  return invoke<void>("clear_conversation");
+}
+
+// Weekly digest
+export async function getWeeklyDigest(): Promise<unknown> {
+  return invoke<unknown>("get_weekly_digest");
+}
+
+// Streaming reasoning — kicks off reason_stream which emits events
+export async function reasonStream(userInput?: string): Promise<ReasonResponse> {
+  return invoke<ReasonResponse>("reason_stream", {
+    userInput: userInput || null,
+  });
 }
