@@ -205,6 +205,27 @@ export async function setActiveRole(name: string | null): Promise<void> {
   return invoke<void>("set_active_role", { name });
 }
 
+// Evolution
+export interface EvolutionProposal {
+  id: string;
+  section: string;
+  content: string;
+  confidence_delta: number;
+  replace: boolean;
+  reason: string;
+  source: string;
+}
+
+export async function getEvolutionProposals(): Promise<EvolutionProposal[]> {
+  return invoke<EvolutionProposal[]>("get_evolution_proposals");
+}
+
+export async function applyEvolution(proposal: EvolutionProposal): Promise<string> {
+  return invoke<string>("apply_evolution", {
+    proposalJson: JSON.stringify(proposal),
+  });
+}
+
 // Streaming reasoning — kicks off reason_stream which emits events
 export async function reasonStream(userInput?: string): Promise<ReasonResponse> {
   return invoke<ReasonResponse>("reason_stream", {

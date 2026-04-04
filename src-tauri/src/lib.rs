@@ -5,6 +5,7 @@ pub mod soul;
 pub mod heartbeat;
 pub mod autonomy;
 pub mod memory;
+pub mod security;
 
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -37,6 +38,7 @@ use plugins::loader;
 use plugins::registry::PluginRegistry;
 
 use memory::ephemeral::EphemeralMemory;
+use soul::evolve::{get_evolution_proposals, apply_evolution};
 
 /// Shared ephemeral memory state for the current session.
 pub struct EphemeralState(pub Arc<Mutex<EphemeralMemory>>);
@@ -238,6 +240,8 @@ pub fn run() {
             list_roles,
             get_active_role,
             set_active_role,
+            get_evolution_proposals,
+            apply_evolution,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

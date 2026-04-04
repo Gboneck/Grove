@@ -1,0 +1,7 @@
+node_modules/
+target/
+dist/
+.git/
+*.log
+grove-data/
+src-tauri/target/
