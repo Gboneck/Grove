@@ -19,6 +19,7 @@ import {
   checkSetup,
   getFileStamps,
   clearConversation,
+  getEnrichmentPrompts,
   Block,
   SetupStatus,
   FileStamps,
@@ -116,6 +117,15 @@ export default function App() {
 
       // Use the final authoritative response (may have all blocks if streaming didn't emit)
       if (response.blocks && Array.isArray(response.blocks)) {
+        // Append enrichment prompts if in early phases
+        try {
+          const enrichment = await getEnrichmentPrompts();
+          if (enrichment.length > 0) {
+            response.blocks.push(...enrichment);
+          }
+        } catch {
+          // Enrichment is optional — ignore errors
+        }
         setBlocks(response.blocks);
         setLastUpdated(new Date());
         setModelSource(response.model_source);
@@ -283,7 +293,7 @@ export default function App() {
         themeHint={themeHint}
       >
         <div className={error ? "opacity-70" : ""}>
-          <BlockRenderer blocks={blocks} onInput={handleInput} />
+          <BlockRenderer blocks={blocks} onInput={handleInput} isLoading={isLoading} />
         </div>
         {isLoading && blocks.length === 0 && <LoadingState />}
         {isLoading && blocks.length > 0 && (

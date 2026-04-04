@@ -37,6 +37,8 @@ pub struct GroveContext {
     pub longterm_context: String,
     /// Active role prompt modifier (from YAML role config)
     pub role_prompt: String,
+    /// Semantic vector search results relevant to current input
+    pub vector_context: String,
 }
 
 impl GroveContext {
@@ -177,6 +179,32 @@ impl GroveContext {
         // Read long-term patterns
         let longterm_context = longterm::context_summary();
 
+        // Semantic vector search — if user has input, find relevant memories
+        let vector_context = if let Some(ref input) = user_input {
+            match crate::memory::vector::search_sync(input, 3) {
+                Some(results) if !results.is_empty() => {
+                    let items: Vec<String> = results
+                        .iter()
+                        .map(|r| {
+                            format!(
+                                "- [{}] {} (relevance: {:.0}%)",
+                                r.category,
+                                r.content,
+                                r.score * 100.0
+                            )
+                        })
+                        .collect();
+                    format!(
+                        "\n--- RELEVANT MEMORIES (semantic search) ---\n{}",
+                        items.join("\n")
+                    )
+                }
+                _ => String::new(),
+            }
+        } else {
+            String::new()
+        };
+
         let now = Local::now();
 
         Ok(GroveContext {
@@ -200,6 +228,7 @@ impl GroveContext {
             working_memory,
             longterm_context,
             role_prompt: String::new(), // Filled by caller when a role is active
+            vector_context,
         })
     }
 
@@ -235,7 +264,7 @@ Time since last session: {}
 
 --- ACCUMULATED INSIGHTS ---
 {}
-{}{}{}{}{}
+{}{}{}{}{}{}
 {}
 {}
 
@@ -252,6 +281,7 @@ Decide what to show. Return JSON only."#,
             self.semantic_facts,
             self.tuning_hints,
             self.plugin_data,
+            if self.vector_context.is_empty() { "" } else { &self.vector_context },
             if self.working_memory.is_empty() { "" } else { &self.working_memory },
             if self.longterm_context.is_empty() { "" } else { &self.longterm_context },
             self.conversation_history

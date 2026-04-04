@@ -53,6 +53,7 @@ pub async fn reason(
     conversation: tauri::State<'_, ConversationState>,
     plugin_state: tauri::State<'_, PluginState>,
     role_state: tauri::State<'_, crate::RoleState>,
+    cycle_counter: tauri::State<'_, crate::CycleCounter>,
 ) -> Result<ReasonResponse, String> {
     let start = Instant::now();
 
@@ -236,13 +237,6 @@ pub async fn reason(
         }
     }
 
-    // 5d. Sync to Qdrant if available (non-blocking)
-    tokio::spawn(async {
-        if crate::memory::vector::is_available().await {
-            crate::memory::vector::sync_from_json().await.ok();
-        }
-    });
-
     // 6. Write reasoning log
     let log_entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),
@@ -256,6 +250,18 @@ pub async fn reason(
         duration_ms,
     };
     write_reasoning_log(&log_entry);
+
+    // 6b. Sync to Qdrant every 5th reasoning cycle (debounced)
+    {
+        let count = cycle_counter.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if count % 5 == 0 {
+            tokio::spawn(async {
+                if crate::memory::vector::is_available().await {
+                    crate::memory::vector::sync_from_json().await.ok();
+                }
+            });
+        }
+    }
 
     // 7. Execute autonomous actions through autonomy gate
     let auto_action_results = if let Some(ref actions) = output.auto_actions {
@@ -326,6 +332,7 @@ pub async fn reason_stream(
     conversation: tauri::State<'_, ConversationState>,
     plugin_state: tauri::State<'_, PluginState>,
     role_state: tauri::State<'_, crate::RoleState>,
+    cycle_counter: tauri::State<'_, crate::CycleCounter>,
 ) -> Result<ReasonResponse, String> {
     use tauri::Emitter;
 
@@ -508,13 +515,6 @@ pub async fn reason_stream(
         }
     }
 
-    // Sync to Qdrant if available (non-blocking)
-    tokio::spawn(async {
-        if crate::memory::vector::is_available().await {
-            crate::memory::vector::sync_from_json().await.ok();
-        }
-    });
-
     let log_entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),
         model_source: source_str.to_string(),
@@ -527,6 +527,18 @@ pub async fn reason_stream(
         duration_ms,
     };
     write_reasoning_log(&log_entry);
+
+    // Sync to Qdrant every 5th reasoning cycle (debounced)
+    {
+        let count = cycle_counter.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if count % 5 == 0 {
+            tokio::spawn(async {
+                if crate::memory::vector::is_available().await {
+                    crate::memory::vector::sync_from_json().await.ok();
+                }
+            });
+        }
+    }
 
     // Execute autonomous actions through autonomy gate
     let auto_action_results = if let Some(ref actions) = output.auto_actions {

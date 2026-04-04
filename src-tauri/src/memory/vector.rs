@@ -241,6 +241,104 @@ pub struct SearchResult {
     pub score: f64,
 }
 
+/// Synchronous search — tries Qdrant first, falls back to offline cosine search.
+/// Used by context gathering which runs in sync Tauri command context.
+pub fn search_sync(query: &str, limit: usize) -> Option<Vec<SearchResult>> {
+    // Try Qdrant via blocking HTTP
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(1))
+        .build()
+        .ok()?;
+
+    let vector = embed_text(query);
+    let body = serde_json::json!({
+        "vector": vector,
+        "limit": limit,
+        "with_payload": true,
+        "score_threshold": 0.3,
+    });
+
+    let resp = client
+        .post(format!(
+            "{}/collections/{}/points/search",
+            QDRANT_URL, COLLECTION_NAME
+        ))
+        .json(&body)
+        .send()
+        .ok();
+
+    if let Some(resp) = resp {
+        if resp.status().is_success() {
+            if let Ok(data) = resp.json::<serde_json::Value>() {
+                let results = parse_search_results(&data);
+                if !results.is_empty() {
+                    return Some(results);
+                }
+            }
+        }
+    }
+
+    // Fallback: offline cosine similarity search on JSON long-term entries
+    Some(offline_search(query, limit))
+}
+
+/// Offline cosine similarity search against long-term JSON entries.
+/// No Qdrant needed — computes embeddings locally and compares.
+fn offline_search(query: &str, limit: usize) -> Vec<SearchResult> {
+    let entries = super::longterm::read_entries();
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let query_vec = embed_text(query);
+    let mut scored: Vec<(SearchResult, f64)> = entries
+        .iter()
+        .map(|entry| {
+            let entry_vec = embed_text(&entry.content);
+            let score: f64 = query_vec
+                .iter()
+                .zip(entry_vec.iter())
+                .map(|(a, b)| a * b)
+                .sum();
+            (
+                SearchResult {
+                    content: entry.content.clone(),
+                    category: format!("{:?}", entry.category).to_lowercase(),
+                    confidence: entry.confidence,
+                    score,
+                },
+                score,
+            )
+        })
+        .filter(|(_, score)| *score > 0.2)
+        .collect();
+
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(limit);
+    scored.into_iter().map(|(r, _)| r).collect()
+}
+
+/// Parse Qdrant search response into SearchResult vec.
+fn parse_search_results(data: &serde_json::Value) -> Vec<SearchResult> {
+    data.get("result")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let score = item.get("score")?.as_f64()?;
+                    let payload = item.get("payload")?;
+                    Some(SearchResult {
+                        content: payload.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        category: payload.get("category").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        confidence: payload.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        score,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // --- Local embedding (bag-of-words TF-IDF approximation) ---
 
 /// Generate a fixed-size vector from text using character n-gram hashing.

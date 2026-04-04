@@ -75,7 +75,72 @@ impl PluginRegistry {
                         }
                     }
                 }
-                _ => {} // http and shell sources can be added later
+                "shell" => {
+                    if let Some(cmd) = ds.source_config.get("command").and_then(|c| c.as_str()) {
+                        match Command::new("sh")
+                            .arg("-c")
+                            .arg(cmd)
+                            .output()
+                        {
+                            Ok(output) if output.status.success() => {
+                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                let trimmed = stdout.trim();
+                                if !trimmed.is_empty() {
+                                    context_parts.push(format!(
+                                        "--- {} ({}) ---\n{}",
+                                        ds.label, id, trimmed
+                                    ));
+                                }
+                            }
+                            Ok(output) => {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                eprintln!(
+                                    "[grove:plugin] Shell data source '{}' failed: {}",
+                                    id, stderr.trim()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[grove:plugin] Shell data source '{}' error: {}",
+                                    id, e
+                                );
+                            }
+                        }
+                    }
+                }
+                "http" => {
+                    if let Some(url) = ds.source_config.get("url").and_then(|u| u.as_str()) {
+                        let fallback = ds
+                            .source_config
+                            .get("fallback")
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("Data unavailable");
+                        match reqwest::blocking::Client::builder()
+                            .timeout(std::time::Duration::from_secs(5))
+                            .build()
+                            .and_then(|c| c.get(url).send())
+                        {
+                            Ok(resp) if resp.status().is_success() => {
+                                if let Ok(body) = resp.text() {
+                                    let trimmed = body.trim();
+                                    if !trimmed.is_empty() {
+                                        context_parts.push(format!(
+                                            "--- {} ({}) ---\n{}",
+                                            ds.label, id, trimmed
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {
+                                context_parts.push(format!(
+                                    "--- {} ({}) ---\n{}",
+                                    ds.label, id, fallback
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 

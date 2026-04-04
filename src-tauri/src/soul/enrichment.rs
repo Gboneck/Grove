@@ -153,6 +153,34 @@ pub fn enrichment_context(soul: &Soul, phase: RelationshipPhase) -> String {
     parts.join("\n")
 }
 
+/// Tauri command: get current enrichment prompts as blocks the frontend can render.
+#[tauri::command]
+pub async fn get_enrichment_prompts() -> Result<Vec<serde_json::Value>, String> {
+    let grove_dir = dirs::home_dir().ok_or("No home directory")?.join(".grove");
+    let soul_raw = std::fs::read_to_string(grove_dir.join("soul.md"))
+        .map_err(|e| format!("Failed to read soul.md: {}", e))?;
+    let soul = Soul::parse(&soul_raw);
+
+    let mem = crate::commands::memory::read_memory_file().unwrap_or_default();
+    let phase = RelationshipPhase::from_metrics(soul.completeness(), mem.sessions.len() as u32);
+
+    let prompts = generate_prompts(&soul, phase);
+    let blocks: Vec<serde_json::Value> = prompts
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "type": "input",
+                "prompt": p.question,
+                "placeholder": format!("Tell Grove about your {}...", p.section.to_lowercase()),
+                "section": p.section,
+                "priority": p.priority,
+            })
+        })
+        .collect();
+
+    Ok(blocks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

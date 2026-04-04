@@ -1,8 +1,13 @@
 import { useState, useRef, useEffect } from "react";
-import { getFullMemory, getReasoningLogs } from "../../lib/tauri";
+import {
+  getFullMemory,
+  getReasoningLogs,
+  vectorSearch,
+  vectorStatus,
+} from "../../lib/tauri";
 
 interface SearchResult {
-  type: "session" | "fact" | "insight" | "log";
+  type: "session" | "fact" | "insight" | "log" | "vector";
   title: string;
   detail: string;
   timestamp?: string;
@@ -18,13 +23,19 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [qdrantAvailable, setQdrantAvailable] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setQuery("");
       setResults([]);
       setTimeout(() => inputRef.current?.focus(), 50);
+      // Check Qdrant availability
+      vectorStatus()
+        .then((s) => setQdrantAvailable(s.available))
+        .catch(() => setQdrantAvailable(false));
     }
   }, [isOpen]);
 
@@ -39,7 +50,9 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
     const found: SearchResult[] = [];
 
     try {
-      // Search memory
+      // Semantic vector search (runs in parallel with keyword search)
+      const vectorPromise = vectorSearch(q, 5).catch(() => []);
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const memory = (await getFullMemory()) as any;
 
@@ -110,6 +123,22 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
           });
         }
       }
+
+      // Merge vector search results (semantic matches that keyword missed)
+      const vectorResults = await vectorPromise;
+      for (const vr of vectorResults) {
+        const alreadyFound = found.some(
+          (f) => f.title.toLowerCase() === vr.content.toLowerCase()
+        );
+        if (!alreadyFound) {
+          found.push({
+            type: "vector",
+            title: vr.content,
+            detail: vr.category,
+            meta: `${(vr.score * 100).toFixed(0)}% match`,
+          });
+        }
+      }
     } catch (e) {
       console.error("Search error:", e);
     }
@@ -120,9 +149,8 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
 
   const handleInput = (value: string) => {
     setQuery(value);
-    // Debounce
-    const timer = setTimeout(() => search(value), 300);
-    return () => clearTimeout(timer);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => search(value), 300);
   };
 
   if (!isOpen) return null;
@@ -132,6 +160,7 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
     fact: "bg-grove-accent/20 text-grove-accent",
     insight: "bg-[#c084fc]/20 text-[#c084fc]",
     log: "bg-grove-model-cloud/20 text-grove-model-cloud",
+    vector: "bg-[#34d399]/20 text-[#34d399]",
   };
 
   return (
@@ -153,8 +182,13 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
             className="flex-1 bg-transparent text-sm text-grove-text-primary placeholder-gray-600 focus:outline-none"
           />
           {searching && (
-            <span className="text-[10px] text-grove-text-secondary">
+            <span className="text-[10px] text-grove-text-secondary animate-pulse">
               searching...
+            </span>
+          )}
+          {qdrantAvailable && (
+            <span className="text-[10px] text-[#34d399]" title="Qdrant vector search active">
+              semantic
             </span>
           )}
         </div>

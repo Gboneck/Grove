@@ -40,9 +40,13 @@ use plugins::registry::PluginRegistry;
 
 use memory::ephemeral::EphemeralMemory;
 use soul::evolve::{get_evolution_proposals, apply_evolution};
+use soul::enrichment::get_enrichment_prompts;
 
 /// Shared ephemeral memory state for the current session.
 pub struct EphemeralState(pub Arc<Mutex<EphemeralMemory>>);
+
+/// Reasoning cycle counter for debouncing vector sync.
+pub struct CycleCounter(pub Arc<std::sync::atomic::AtomicU64>);
 
 /// Active reasoning role state (e.g., "builder", "reflector").
 pub struct RoleState(pub Arc<Mutex<Option<String>>>);
@@ -100,6 +104,9 @@ pub fn run() {
     // Initialize role state (no active role by default)
     let role_state = RoleState(Arc::new(Mutex::new(None)));
 
+    // Initialize cycle counter for Qdrant sync debouncing
+    let cycle_counter = CycleCounter(Arc::new(std::sync::atomic::AtomicU64::new(0)));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(router_state)
@@ -107,6 +114,7 @@ pub fn run() {
         .manage(conversation_state)
         .manage(ephemeral_state)
         .manage(role_state)
+        .manage(cycle_counter)
         .setup(move |app| {
             // Start the heartbeat background loop
             let grove_dir = dirs::home_dir()
@@ -246,6 +254,7 @@ pub fn run() {
             vector_status,
             vector_sync,
             vector_search,
+            get_enrichment_prompts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

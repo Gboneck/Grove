@@ -264,3 +264,8 @@ export async function vectorSearch(
     limit: limit || null,
   });
 }
+
+// Soul enrichment prompts
+export async function getEnrichmentPrompts(): Promise<Block[]> {
+  return invoke<Block[]>("get_enrichment_prompts");
+}
