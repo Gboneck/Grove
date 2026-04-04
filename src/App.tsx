@@ -249,6 +249,7 @@ export default function App() {
         onOpenProfiles={() => setProfilesOpen(true)}
         onOpenContext={() => setContextOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
+        onInput={handleInput}
         hasUpdate={hasPeriodicUpdate}
         onAcknowledgeUpdate={() => setHasPeriodicUpdate(false)}
         isLoading={isLoading}
