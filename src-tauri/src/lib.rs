@@ -72,6 +72,7 @@ pub fn run() {
     let conversation_state = ConversationState(Arc::new(Mutex::new(Vec::new())));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(router_state)
         .manage(plugin_state)
         .manage(conversation_state)
@@ -108,14 +109,39 @@ pub fn run() {
                                     ModelSource::Local => "local",
                                     ModelSource::Cloud => "cloud",
                                 };
+
+                                // Extract notification text from insights or summary
+                                let notif_body = output.insights.as_ref()
+                                    .and_then(|ins| ins.first().cloned())
+                                    .or_else(|| output.session_summary.clone())
+                                    .unwrap_or_else(|| "New reasoning update available".to_string());
+
+                                // Check for urgent/important blocks
+                                let has_urgent = output.blocks.iter().any(|b| {
+                                    b.get("icon").and_then(|v| v.as_str()) == Some("warning")
+                                        || b.get("icon").and_then(|v| v.as_str()) == Some("alert")
+                                        || output.ambient_mood.as_deref() == Some("urgent")
+                                });
+
                                 let payload = serde_json::json!({
                                     "blocks": output.blocks,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
                                     "model_source": source_str,
                                     "ambient_mood": output.ambient_mood,
                                     "theme_hint": output.ambient_theme,
+                                    "has_urgent": has_urgent,
                                 });
                                 handle.emit("periodic-reasoning", &payload).ok();
+
+                                // Send desktop notification
+                                use tauri_plugin_notification::NotificationExt;
+                                let title = if has_urgent { "Grove — Needs Attention" } else { "Grove" };
+                                handle.notification()
+                                    .builder()
+                                    .title(title)
+                                    .body(&notif_body)
+                                    .show()
+                                    .ok();
                             }
                             Err(e) => {
                                 eprintln!("[grove] Periodic reasoning failed: {}", e);

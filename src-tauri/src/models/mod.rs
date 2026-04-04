@@ -16,21 +16,48 @@ pub enum ModelSource {
 }
 
 /// The intent behind a reasoning request — determines routing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReasoningIntent {
     ComposeUI,
     RespondToInput(String),
     PlanAction,
     Reflect,
+    QuickAnswer(String),
+    CreativeHelp(String),
+    EmotionalSupport(String),
+    StatusCheck,
 }
 
 impl ReasoningIntent {
     pub fn is_fast_path(&self) -> bool {
-        matches!(self, ReasoningIntent::ComposeUI | ReasoningIntent::Reflect)
+        matches!(
+            self,
+            ReasoningIntent::ComposeUI
+                | ReasoningIntent::Reflect
+                | ReasoningIntent::QuickAnswer(_)
+                | ReasoningIntent::StatusCheck
+        )
     }
 
     pub fn requires_deep_reasoning(&self) -> bool {
-        matches!(self, ReasoningIntent::PlanAction)
+        matches!(
+            self,
+            ReasoningIntent::PlanAction | ReasoningIntent::CreativeHelp(_)
+        )
+    }
+
+    pub fn label(&self) -> &str {
+        match self {
+            ReasoningIntent::ComposeUI => "compose_ui",
+            ReasoningIntent::RespondToInput(_) => "respond_to_input",
+            ReasoningIntent::PlanAction => "plan_action",
+            ReasoningIntent::Reflect => "reflect",
+            ReasoningIntent::QuickAnswer(_) => "quick_answer",
+            ReasoningIntent::CreativeHelp(_) => "creative_help",
+            ReasoningIntent::EmotionalSupport(_) => "emotional_support",
+            ReasoningIntent::StatusCheck => "status_check",
+        }
     }
 }
 

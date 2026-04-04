@@ -12,6 +12,8 @@ interface GroveShellProps {
   onOpenProfiles: () => void;
   onOpenContext: () => void;
   onOpenSearch: () => void;
+  hasUpdate?: boolean;
+  onAcknowledgeUpdate?: () => void;
   isLoading: boolean;
   lastUpdated: Date | null;
   modelSource: "local" | "cloud" | null;
@@ -44,6 +46,8 @@ export default function GroveShell({
   onOpenProfiles,
   onOpenContext,
   onOpenSearch,
+  hasUpdate,
+  onAcknowledgeUpdate,
   isLoading,
   lastUpdated,
   modelSource,
@@ -78,7 +82,17 @@ export default function GroveShell({
             >
               Grove
             </span>
-            <span className="text-gray-600 text-sm">v0.6</span>
+            <span className="text-gray-600 text-sm">v0.7</span>
+            {hasUpdate && (
+              <button
+                onClick={() => onAcknowledgeUpdate?.()}
+                className="relative flex items-center gap-1 text-xs text-grove-accent animate-pulse"
+                title="New periodic update arrived"
+              >
+                <span className="w-2 h-2 rounded-full bg-grove-accent" />
+                new update
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <ModelIndicator lastSource={modelSource} />

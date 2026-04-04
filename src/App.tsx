@@ -22,6 +22,10 @@ import {
   FileStamps,
 } from "./lib/tauri";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  isPermissionGranted,
+  requestPermission,
+} from "@tauri-apps/plugin-notification";
 
 const FALLBACK_BLOCKS: Block[] = [
   {
@@ -59,6 +63,7 @@ export default function App() {
   const [contextOpen, setContextOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [hasPeriodicUpdate, setHasPeriodicUpdate] = useState(false);
   const lastStampsRef = useRef<FileStamps | null>(null);
 
   // Check setup on mount
@@ -76,6 +81,13 @@ export default function App() {
         // Can't check setup — just try to run
         setPhase("running");
       });
+
+    // Request notification permission on startup
+    isPermissionGranted().then((granted) => {
+      if (!granted) {
+        requestPermission().catch(() => {});
+      }
+    }).catch(() => {});
   }, []);
 
   const reason = useCallback(async (userInput?: string) => {
@@ -118,6 +130,7 @@ export default function App() {
       model_source: string;
       ambient_mood: string | null;
       theme_hint: string | null;
+      has_urgent: boolean;
     }>("periodic-reasoning", (event) => {
       const data = event.payload;
       if (data.blocks && Array.isArray(data.blocks)) {
@@ -126,6 +139,7 @@ export default function App() {
         setModelSource(data.model_source as "local" | "cloud");
         setAmbientMood(data.ambient_mood);
         setThemeHint(data.theme_hint);
+        setHasPeriodicUpdate(true);
       }
     });
     return () => {
@@ -235,6 +249,8 @@ export default function App() {
         onOpenProfiles={() => setProfilesOpen(true)}
         onOpenContext={() => setContextOpen(true)}
         onOpenSearch={() => setSearchOpen(true)}
+        hasUpdate={hasPeriodicUpdate}
+        onAcknowledgeUpdate={() => setHasPeriodicUpdate(false)}
         isLoading={isLoading}
         lastUpdated={lastUpdated}
         modelSource={modelSource}

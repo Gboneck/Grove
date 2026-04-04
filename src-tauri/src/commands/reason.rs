@@ -63,30 +63,15 @@ pub async fn reason(
         }
     }
 
-    // 2. Determine intent
+    // 2. Determine intent — use model-based classification when input is present
+    let router = state.0.lock().await;
     let intent = match &user_input {
-        Some(input) => {
-            let lower = input.to_lowercase();
-            if lower.contains("plan")
-                || lower.contains("prioritize")
-                || lower.contains("think hard")
-                || lower.contains("strategy")
-            {
-                ReasoningIntent::PlanAction
-            } else {
-                ReasoningIntent::RespondToInput(input.clone())
-            }
-        }
+        Some(input) => router.classify_intent(input).await,
         None => ReasoningIntent::ComposeUI,
     };
+    drop(router);
 
-    let intent_str = match &intent {
-        ReasoningIntent::ComposeUI => "compose_ui",
-        ReasoningIntent::RespondToInput(_) => "respond_to_input",
-        ReasoningIntent::PlanAction => "plan_action",
-        ReasoningIntent::Reflect => "reflect",
-    }
-    .to_string();
+    let intent_str = intent.label().to_string();
 
     // 3. Build conversation context
     let mut conv = conversation.0.lock().await;

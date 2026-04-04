@@ -4,6 +4,69 @@ use super::context::GroveContext;
 use super::gemma::{self, GemmaModel};
 use super::{ModelError, ModelSource, ReasoningIntent, ReasoningOutput};
 
+/// Heuristic fallback for intent classification when model-based classification is unavailable
+fn heuristic_classify(input: &str) -> ReasoningIntent {
+    let lower = input.to_lowercase();
+
+    // Plan/strategy keywords
+    if lower.contains("plan")
+        || lower.contains("prioritize")
+        || lower.contains("think hard")
+        || lower.contains("strategy")
+        || lower.contains("roadmap")
+        || lower.contains("next steps")
+    {
+        return ReasoningIntent::PlanAction;
+    }
+
+    // Status check patterns
+    if lower.contains("how am i")
+        || lower.contains("my progress")
+        || lower.contains("show status")
+        || lower.contains("check in")
+        || lower.contains("where do i stand")
+    {
+        return ReasoningIntent::StatusCheck;
+    }
+
+    // Quick factual questions
+    if lower.starts_with("what is")
+        || lower.starts_with("what's")
+        || lower.starts_with("how many")
+        || lower.starts_with("when is")
+        || lower.starts_with("who is")
+        || (lower.contains('?') && lower.len() < 60)
+    {
+        return ReasoningIntent::QuickAnswer(input.to_string());
+    }
+
+    // Emotional support signals
+    if lower.contains("overwhelmed")
+        || lower.contains("stressed")
+        || lower.contains("burned out")
+        || lower.contains("frustrated")
+        || lower.contains("struggling")
+        || lower.contains("anxious")
+        || lower.contains("i feel")
+        || lower.contains("i'm feeling")
+    {
+        return ReasoningIntent::EmotionalSupport(input.to_string());
+    }
+
+    // Creative work
+    if lower.contains("brainstorm")
+        || lower.contains("name ideas")
+        || lower.contains("write me")
+        || lower.contains("help me write")
+        || lower.contains("creative")
+        || lower.contains("design ideas")
+    {
+        return ReasoningIntent::CreativeHelp(input.to_string());
+    }
+
+    ReasoningIntent::RespondToInput(input.to_string())
+}
+
 /// Mode override the user can set from the frontend
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModelMode {
@@ -39,6 +102,22 @@ impl ModelRouter {
 
     pub fn set_mode(&mut self, mode: ModelMode) {
         self.mode = mode;
+    }
+
+    /// Classify user input into an intent. Tries model-based classification first,
+    /// falls back to keyword heuristics if the model is unavailable or fails.
+    pub async fn classify_intent(&self, user_input: &str) -> ReasoningIntent {
+        // Try model-based classification if Gemma is available
+        if self.gemma.is_available().await {
+            if let Some(intent) = self.gemma.classify_intent(user_input).await {
+                eprintln!("[grove] Intent classified by model: {:?}", intent.label());
+                return intent;
+            }
+        }
+        // Fall back to heuristics
+        let intent = heuristic_classify(user_input);
+        eprintln!("[grove] Intent classified by heuristic: {:?}", intent.label());
+        intent
     }
 
     pub async fn route(

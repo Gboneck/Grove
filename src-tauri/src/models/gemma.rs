@@ -1,5 +1,5 @@
 use super::config::GroveConfig;
-use super::{ModelError, ModelSource, RawReasoningResponse, ReasoningOutput};
+use super::{ModelError, ModelSource, RawReasoningResponse, ReasoningIntent, ReasoningOutput};
 
 const SYSTEM_PROMPT: &str = r#"You are the reasoning engine of Grove OS — a personal operating system.
 Your job is to decide what the user needs to see RIGHT NOW.
@@ -63,6 +63,60 @@ impl GemmaModel {
         match self.client.get(&url).send().await {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
+        }
+    }
+
+    /// Fast intent classification using the local model.
+    /// Returns None if classification fails (caller should fall back to heuristics).
+    pub async fn classify_intent(&self, user_input: &str) -> Option<ReasoningIntent> {
+        let prompt = format!(
+            r#"Classify this user input into exactly ONE category. Reply with ONLY the category name, nothing else.
+
+Categories:
+- plan_action: planning, strategy, prioritization, "think hard", roadmap
+- quick_answer: simple factual question, "what is", "how do I", short answer
+- creative_help: writing, brainstorming, naming, design ideas, creative work
+- emotional_support: venting, stress, feeling overwhelmed, motivation, encouragement
+- status_check: "how am I doing", "what's my progress", "show status", check-in
+- respond_to_input: general conversation, commands, requests that don't fit above
+
+Input: {}"#,
+            user_input
+        );
+
+        let url = format!("{}/api/generate", self.base_url);
+        let resp = self.client
+            .post(&url)
+            .json(&serde_json::json!({
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": false,
+                "options": {
+                    "num_ctx": 512,
+                    "temperature": 0.1,
+                    "num_predict": 20
+                }
+            }))
+            .send()
+            .await
+            .ok()?;
+
+        if !resp.status().is_success() {
+            return None;
+        }
+
+        let json: serde_json::Value = resp.json().await.ok()?;
+        let text = json.get("response")?.as_str()?.trim().to_lowercase();
+
+        let input = user_input.to_string();
+        match text.as_str() {
+            s if s.contains("plan_action") => Some(ReasoningIntent::PlanAction),
+            s if s.contains("quick_answer") => Some(ReasoningIntent::QuickAnswer(input)),
+            s if s.contains("creative_help") => Some(ReasoningIntent::CreativeHelp(input)),
+            s if s.contains("emotional_support") => Some(ReasoningIntent::EmotionalSupport(input)),
+            s if s.contains("status_check") => Some(ReasoningIntent::StatusCheck),
+            s if s.contains("respond_to_input") => Some(ReasoningIntent::RespondToInput(input)),
+            _ => None,
         }
     }
 
