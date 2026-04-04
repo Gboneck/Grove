@@ -39,6 +39,7 @@ use plugins::loader;
 use plugins::registry::PluginRegistry;
 
 use memory::ephemeral::EphemeralMemory;
+use commands::enrichment::answer_enrichment;
 use soul::evolve::{get_evolution_proposals, apply_evolution};
 use soul::enrichment::get_enrichment_prompts;
 
@@ -255,6 +256,7 @@ pub fn run() {
             vector_sync,
             vector_search,
             get_enrichment_prompts,
+            answer_enrichment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

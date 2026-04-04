@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   getFullMemory,
   getReasoningLogs,
@@ -24,8 +24,10 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [qdrantAvailable, setQdrantAvailable] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -144,6 +146,7 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
     }
 
     setResults(found);
+    setSelectedIndex(-1);
     setSearching(false);
   };
 
@@ -152,6 +155,29 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => search(value), 300);
   };
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedIndex((prev) => Math.min(prev + 1, results.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedIndex((prev) => Math.max(prev - 1, -1));
+      } else if (e.key === "Escape") {
+        onClose();
+      }
+    },
+    [results.length, onClose]
+  );
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (selectedIndex >= 0 && resultsRef.current) {
+      const items = resultsRef.current.querySelectorAll("[data-result-item]");
+      items[selectedIndex]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex]);
 
   if (!isOpen) return null;
 
@@ -177,7 +203,7 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
             ref={inputRef}
             value={query}
             onChange={(e) => handleInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && onClose()}
+            onKeyDown={handleKeyDown}
             placeholder="Search memory, facts, logs..."
             className="flex-1 bg-transparent text-sm text-grove-text-primary placeholder-gray-600 focus:outline-none"
           />
@@ -194,7 +220,7 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
         </div>
 
         {/* Results */}
-        <div className="max-h-[400px] overflow-y-auto">
+        <div className="max-h-[400px] overflow-y-auto" ref={resultsRef}>
           {results.length === 0 && query.length >= 2 && !searching ? (
             <div className="px-4 py-8 text-center text-xs text-grove-text-secondary">
               No results found
@@ -208,7 +234,12 @@ export default function SearchPanel({ isOpen, onClose }: SearchPanelProps) {
               {results.map((r, i) => (
                 <div
                   key={i}
-                  className="px-4 py-3 hover:bg-grove-surface transition-colors border-b border-grove-border/50 last:border-0"
+                  data-result-item
+                  className={`px-4 py-3 transition-colors border-b border-grove-border/50 last:border-0 ${
+                    i === selectedIndex
+                      ? "bg-grove-accent/10 border-l-2 border-l-grove-accent"
+                      : "hover:bg-grove-surface"
+                  }`}
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <span

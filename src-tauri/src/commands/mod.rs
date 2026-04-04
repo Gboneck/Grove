@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod autonomous;
 pub mod context;
+pub mod enrichment;
 pub mod identity;
 pub mod logs;
 pub mod mcp;

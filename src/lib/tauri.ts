@@ -151,9 +151,9 @@ export async function listActions(): Promise<ActionDef[]> {
 // Memory stats
 export interface MemoryStats {
   total_sessions: number;
-  total_facts: number;
-  total_patterns: number;
-  total_insights: number;
+  facts_count: number;
+  patterns_count: number;
+  insights_count: number;
 }
 
 export async function getMemoryStats(): Promise<MemoryStats> {
@@ -268,4 +268,12 @@ export async function vectorSearch(
 // Soul enrichment prompts
 export async function getEnrichmentPrompts(): Promise<Block[]> {
   return invoke<Block[]>("get_enrichment_prompts");
+}
+
+// Answer an enrichment prompt (patches Soul.md directly)
+export async function answerEnrichment(
+  section: string,
+  answer: string
+): Promise<string> {
+  return invoke<string>("answer_enrichment", { section, answer });
 }
