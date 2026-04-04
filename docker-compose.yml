@@ -1,0 +1,82 @@
+# Grove OS — Docker Compose
+# Runs Grove MCP server alongside Ollama (local LLM) and Qdrant (future vector DB)
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose up ollama -d   # Start just Ollama
+#   docker compose logs grove     # View Grove logs
+#
+# Volumes:
+#   grove-data: Persistent user data (soul.md, memory, notes)
+#   ollama-data: Downloaded model weights
+#   qdrant-data: Vector database storage (future)
+
+services:
+  # Grove OS — headless MCP server mode
+  grove:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grove-os
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_HOST=http://ollama:11434
+      - GROVE_HEADLESS=1
+    volumes:
+      - grove-data:/home/grove/.grove
+    depends_on:
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+    stdin_open: true
+
+  # Ollama — local LLM inference
+  ollama:
+    image: ollama/ollama:latest
+    container_name: grove-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # Ollama model puller — downloads Gemma on first run
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: grove-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_started
+    entrypoint: >
+      sh -c "
+        echo 'Waiting for Ollama...' &&
+        sleep 5 &&
+        ollama pull gemma3:4b &&
+        echo 'Gemma 3 4B ready'
+      "
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    restart: "no"
+
+  # Qdrant — vector database for long-term semantic memory (future)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: grove-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  grove-data:
+  ollama-data:
+  qdrant-data:

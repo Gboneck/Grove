@@ -44,7 +44,8 @@ grove-os/
 │   │   │   ├── setup.rs         # Onboarding flow
 │   │   │   ├── watch.rs         # File watcher
 │   │   │   ├── actions.rs       # Action executor
-│   │   │   ├── mcp.rs           # MCP integration
+│   │   │   ├── mcp.rs           # MCP integration (9 tools)
+│   │   │   ├── roles.rs         # YAML role loader + switching (Session 3)
 │   │   │   ├── logs.rs          # Reasoning logs
 │   │   │   └── system.rs        # System info
 │   │   ├── heartbeat/           # Always-on background loop (Session 2)
@@ -52,22 +53,22 @@ grove-os/
 │   │   │   ├── observer.rs      # File watcher, time, system state
 │   │   │   ├── scheduler.rs     # Tick interval + queue
 │   │   │   └── patterns.rs      # Ambient pattern detection
-│   │   ├── soul/                # Soul.md management (Session 1)
+│   │   ├── soul/                # Soul.md management (Sessions 1-4)
 │   │   │   ├── mod.rs
 │   │   │   ├── parser.rs        # Structured section parsing
 │   │   │   ├── patcher.rs       # Confidence-scored updates
-│   │   │   └── evolution.rs     # Phase tracking
+│   │   │   ├── evolution.rs     # 9-phase relationship tracking
+│   │   │   ├── autopatch.rs     # Keyword-based insight extraction
+│   │   │   └── evolve.rs        # Self-evolution engine (propose/judge/apply)
 │   │   ├── memory/              # Three-tier memory (Session 2)
 │   │   │   ├── mod.rs
 │   │   │   ├── ephemeral.rs     # Current session
 │   │   │   ├── working.rs       # Recent days (MEMORY.md)
 │   │   │   └── longterm.rs      # Persistent patterns
 │   │   ├── autonomy/            # Decision gates (Session 3)
-│   │   │   ├── mod.rs
-│   │   │   └── scoring.rs       # 5-factor scoring
-│   │   ├── mcp/                 # Enhanced MCP (Session 3)
-│   │   │   ├── mod.rs
-│   │   │   └── tools.rs         # Intelligence queries
+│   │   │   ├── mod.rs           # gate_actions() with 5-factor scoring
+│   │   │   └── scoring.rs       # AutonomyScore composite
+│   │   ├── security.rs          # Input/path/command/URL validation (Session 4)
 │   │   └── plugins/             # Plugin system
 │   │       ├── mod.rs
 │   │       ├── loader.rs
@@ -91,8 +92,11 @@ grove-os/
 │   │   ├── ActionLog.tsx        # Toast notifications
 │   │   ├── SetupScreen.tsx      # Onboarding
 │   │   ├── IdentityWizard.tsx   # Soul generation
+│   │   ├── RoleSwitcher.tsx     # Role switching dropdown (Session 3)
+│   │   ├── Modal.tsx            # Shared modal wrapper (Session 5)
+│   │   ├── ErrorBoundary.tsx    # React error boundary (Session 5)
 │   │   ├── blocks/              # 10 block types
-│   │   └── panels/              # 7 panel types
+│   │   └── panels/              # 7 panel types (using Modal)
 │   ├── hooks/                   # Custom hooks (Session 2+)
 │   │   ├── useReasoning.ts
 │   │   ├── useHeartbeat.ts

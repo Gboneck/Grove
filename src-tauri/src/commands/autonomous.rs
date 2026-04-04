@@ -117,16 +117,14 @@ fn execute_file_write(action: &AutoAction) -> Option<String> {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    // Only allow writes under ~/.grove/
-    let expanded = file_path.replace(
-        "~",
-        &dirs::home_dir()?.to_string_lossy(),
-    );
-
-    if !expanded.contains(".grove") {
-        eprintln!("[grove] Auto file_write blocked — path must be under ~/.grove/");
-        return None;
-    }
+    // Security: validate path and enforce grove directory restriction
+    let expanded = match crate::security::validate_file_path(file_path, true) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[grove] Auto file_write blocked: {}", e);
+            return None;
+        }
+    };
 
     // Ensure parent dir exists
     if let Some(parent) = std::path::Path::new(&expanded).parent() {

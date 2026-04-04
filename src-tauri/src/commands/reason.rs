@@ -56,6 +56,12 @@ pub async fn reason(
 ) -> Result<ReasonResponse, String> {
     let start = Instant::now();
 
+    // 0. Validate user input
+    let user_input = match user_input {
+        Some(raw) => Some(crate::security::validate_user_input(&raw)?),
+        None => None,
+    };
+
     // Run on_reason hooks
     {
         let registry = plugin_state.0.lock().await;
@@ -194,12 +200,25 @@ pub async fn reason(
         &insights,
     ).ok();
 
-    // 5c. Auto-patch soul.md from model insights
-    if !insights.is_empty() {
-        match crate::soul::autopatch::auto_patch_soul(&insights) {
-            Ok(0) => {} // No patches needed
-            Ok(n) => eprintln!("[grove] Auto-patched soul.md with {} insight(s)", n),
-            Err(e) => eprintln!("[grove] Soul auto-patch error: {}", e),
+    // 5c. Run soul self-evolution engine (propose → judge → apply)
+    {
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem_data = memory::read_memory_file().unwrap_or_default();
+        let evo_phase = RelationshipPhase::from_metrics(
+            soul.completeness(),
+            mem_data.sessions.len() as u32,
+        );
+        match crate::soul::evolve::EvolutionEngine::run_cycle(&insights, evo_phase) {
+            Ok(applied) if !applied.is_empty() => {
+                for a in &applied {
+                    eprintln!("[grove:evolve] {}", a);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("[grove:evolve] Error: {}", e),
         }
     }
 
@@ -290,6 +309,12 @@ pub async fn reason_stream(
     use tauri::Emitter;
 
     let start = Instant::now();
+
+    // 0. Validate user input
+    let user_input = match user_input {
+        Some(raw) => Some(crate::security::validate_user_input(&raw)?),
+        None => None,
+    };
 
     // Run on_reason hooks
     {
@@ -426,12 +451,25 @@ pub async fn reason_stream(
         &insights,
     ).ok();
 
-    // Auto-patch soul.md from model insights
-    if !insights.is_empty() {
-        match crate::soul::autopatch::auto_patch_soul(&insights) {
-            Ok(0) => {}
-            Ok(n) => eprintln!("[grove] Auto-patched soul.md with {} insight(s)", n),
-            Err(e) => eprintln!("[grove] Soul auto-patch error: {}", e),
+    // Run soul self-evolution engine (propose → judge → apply)
+    {
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem_data = memory::read_memory_file().unwrap_or_default();
+        let evo_phase = RelationshipPhase::from_metrics(
+            soul.completeness(),
+            mem_data.sessions.len() as u32,
+        );
+        match crate::soul::evolve::EvolutionEngine::run_cycle(&insights, evo_phase) {
+            Ok(applied) if !applied.is_empty() => {
+                for a in &applied {
+                    eprintln!("[grove:evolve] {}", a);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("[grove:evolve] Error: {}", e),
         }
     }
 

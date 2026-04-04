@@ -49,6 +49,9 @@ pub async fn execute_action(
                 .and_then(|c| c.as_str())
                 .ok_or("Shell action missing 'command' in executor_config")?;
 
+            // Security: validate shell command before execution
+            crate::security::validate_shell_command(command)?;
+
             let output = tokio::process::Command::new("sh")
                 .arg("-c")
                 .arg(command)
@@ -80,10 +83,9 @@ pub async fn execute_action(
                 .and_then(|p| p.get("content").and_then(|c| c.as_str().map(String::from)))
                 .unwrap_or_default();
 
-            let expanded = path.replace(
-                "~",
-                &dirs::home_dir().unwrap_or_default().to_string_lossy(),
-            );
+            // Security: validate and sanitize file path
+            let expanded = crate::security::validate_file_path(path, false)?;
+
             std::fs::write(&expanded, &content)
                 .map_err(|e| format!("Failed to write file: {}", e))?;
 
@@ -99,6 +101,9 @@ pub async fn execute_action(
                 .get("url")
                 .and_then(|u| u.as_str())
                 .ok_or("http action missing 'url'")?;
+
+            // Security: validate URL
+            crate::security::validate_url(url)?;
 
             let method = action
                 .executor_config
