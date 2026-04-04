@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import ModelIndicator from "./ModelIndicator";
+import NavMenu from "./NavMenu";
 
 interface GroveShellProps {
   children: ReactNode;
@@ -9,6 +10,8 @@ interface GroveShellProps {
   onOpenLogs: () => void;
   onOpenPlugins: () => void;
   onOpenProfiles: () => void;
+  onOpenContext: () => void;
+  onOpenSearch: () => void;
   isLoading: boolean;
   lastUpdated: Date | null;
   modelSource: "local" | "cloud" | null;
@@ -39,6 +42,8 @@ export default function GroveShell({
   onOpenLogs,
   onOpenPlugins,
   onOpenProfiles,
+  onOpenContext,
+  onOpenSearch,
   isLoading,
   lastUpdated,
   modelSource,
@@ -73,48 +78,30 @@ export default function GroveShell({
             >
               Grove
             </span>
-            <span className="text-gray-600 text-sm">v0.4</span>
+            <span className="text-gray-600 text-sm">v0.6</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <ModelIndicator lastSource={modelSource} />
             <span className="text-sm text-grove-text-secondary font-mono">
               {timeStr}
             </span>
             <button
-              onClick={onOpenMemory}
-              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
-              title="View Memory"
+              onClick={onOpenSearch}
+              className="text-xs text-grove-text-secondary hover:text-grove-accent transition-colors px-2 py-1 rounded border border-grove-border hover:border-grove-accent/40"
+              title="Search (Ctrl+/)"
             >
-              memory
+              search
             </button>
-            <button
-              onClick={onOpenLogs}
-              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
-              title="Reasoning Logs"
-            >
-              logs
-            </button>
-            <button
-              onClick={onOpenPlugins}
-              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
-              title="Manage Plugins"
-            >
-              plugins
-            </button>
-            <button
-              onClick={onOpenProfiles}
-              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
-              title="Switch Profile"
-            >
-              profile
-            </button>
-            <button
-              onClick={onOpenSoul}
-              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
-              title="Edit Soul.md"
-            >
-              soul
-            </button>
+            <NavMenu
+              items={[
+                { label: "soul", action: onOpenSoul },
+                { label: "context", action: onOpenContext },
+                { label: "memory", action: onOpenMemory },
+                { label: "logs", action: onOpenLogs },
+                { label: "plugins", action: onOpenPlugins },
+                { label: "profiles", action: onOpenProfiles },
+              ]}
+            />
             <button
               onClick={onRefresh}
               disabled={isLoading}

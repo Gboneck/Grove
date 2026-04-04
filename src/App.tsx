@@ -9,6 +9,9 @@ import MemoryPanel from "./components/panels/MemoryPanel";
 import LogsPanel from "./components/panels/LogsPanel";
 import PluginPanel from "./components/panels/PluginPanel";
 import ProfilePanel from "./components/panels/ProfilePanel";
+import ContextEditor from "./components/panels/ContextEditor";
+import SearchPanel from "./components/panels/SearchPanel";
+import CommandPalette from "./components/CommandPalette";
 import {
   reason as invokeReason,
   checkSetup,
@@ -53,6 +56,9 @@ export default function App() {
   const [logsOpen, setLogsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [profilesOpen, setProfilesOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const lastStampsRef = useRef<FileStamps | null>(null);
 
   // Check setup on mount
@@ -127,6 +133,38 @@ export default function App() {
     };
   }, []);
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      } else if (meta && e.key === "/") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      } else if (e.key === "Escape") {
+        // Close any open panel
+        setPaletteOpen(false);
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Command palette commands
+  const paletteCommands = [
+    { id: "reason", label: "Refresh / Re-reason", shortcut: "R", action: () => { clearConversation().catch(() => {}); reason(); } },
+    { id: "search", label: "Search memory & logs", shortcut: "Ctrl+/", action: () => setSearchOpen(true) },
+    { id: "soul", label: "Edit Soul.md", action: () => setSoulEditorOpen(true) },
+    { id: "context", label: "Edit Context / Ventures", action: () => setContextOpen(true) },
+    { id: "memory", label: "View Memory", action: () => setMemoryOpen(true) },
+    { id: "logs", label: "View Reasoning Logs", action: () => setLogsOpen(true) },
+    { id: "plugins", label: "Manage Plugins", action: () => setPluginsOpen(true) },
+    { id: "profiles", label: "Switch Profile", action: () => setProfilesOpen(true) },
+  ];
+
   // Poll ~/.grove/ files for external changes every 10s
   useEffect(() => {
     if (phase !== "running") return;
@@ -195,6 +233,8 @@ export default function App() {
         onOpenLogs={() => setLogsOpen(true)}
         onOpenPlugins={() => setPluginsOpen(true)}
         onOpenProfiles={() => setProfilesOpen(true)}
+        onOpenContext={() => setContextOpen(true)}
+        onOpenSearch={() => setSearchOpen(true)}
         isLoading={isLoading}
         lastUpdated={lastUpdated}
         modelSource={modelSource}
@@ -233,6 +273,19 @@ export default function App() {
           clearConversation().catch(() => {});
           reason();
         }}
+      />
+      <ContextEditor
+        isOpen={contextOpen}
+        onClose={() => setContextOpen(false)}
+      />
+      <SearchPanel
+        isOpen={searchOpen}
+        onClose={() => setSearchOpen(false)}
+      />
+      <CommandPalette
+        isOpen={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={paletteCommands}
       />
     </>
   );
