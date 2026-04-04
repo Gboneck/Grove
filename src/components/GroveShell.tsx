@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useState, useRef, useCallback } from "react";
 import ModelIndicator from "./ModelIndicator";
 import NavMenu from "./NavMenu";
 import DaemonOrb, { type OrbState } from "./DaemonOrb";
+import { RoleSwitcher } from "./RoleSwitcher";
 
 interface GroveShellProps {
   children: ReactNode;
@@ -144,6 +145,7 @@ export default function GroveShell({
             )}
           </div>
           <div className="flex items-center gap-3">
+            <RoleSwitcher />
             <ModelIndicator lastSource={modelSource} />
             <span className="text-sm text-grove-text-secondary font-mono">
               {timeStr}

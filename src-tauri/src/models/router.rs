@@ -9,6 +9,18 @@ use super::{ModelError, ModelSource, ReasoningIntent, ReasoningOutput};
 fn heuristic_classify(input: &str) -> ReasoningIntent {
     let lower = input.to_lowercase();
 
+    // Dual-pass triggers: strategic decisions needing both speed and depth
+    if lower.contains("should i")
+        || lower.contains("compare")
+        || lower.contains("trade-off")
+        || lower.contains("tradeoff")
+        || lower.contains("weigh my options")
+        || lower.contains("big decision")
+        || lower.contains("life decision")
+    {
+        return ReasoningIntent::DualPass(input.to_string());
+    }
+
     // Plan/strategy keywords
     if lower.contains("plan")
         || lower.contains("prioritize")
@@ -127,7 +139,11 @@ impl ModelRouter {
         intent: &ReasoningIntent,
     ) -> Result<ReasoningOutput, ModelError> {
         let base_prompt = gemma::system_prompt();
-        let system_prompt_owned = format!("{}\n\n{}", context.phase_prompt, base_prompt);
+        let system_prompt_owned = if context.role_prompt.is_empty() {
+            format!("{}\n\n{}", context.phase_prompt, base_prompt)
+        } else {
+            format!("{}\n\n{}\n\n{}", context.phase_prompt, context.role_prompt, base_prompt)
+        };
         let system_prompt: &str = &system_prompt_owned;
         let user_message = context.to_user_message();
 
@@ -161,6 +177,11 @@ impl ModelRouter {
         }
 
         // 3. Both available — route by intent
+        // 3a. Dual-pass: Gemma drafts fast, Claude refines
+        if intent.requires_dual_pass() {
+            return self.dual_pass(system_prompt, &user_message).await;
+        }
+
         if intent.requires_deep_reasoning() {
             return self.claude.reason(system_prompt, &user_message, false).await;
         }
@@ -217,7 +238,11 @@ impl ModelRouter {
         F: FnMut(Value) + Send,
     {
         let base_prompt = gemma::system_prompt();
-        let system_prompt_owned = format!("{}\n\n{}", context.phase_prompt, base_prompt);
+        let system_prompt_owned = if context.role_prompt.is_empty() {
+            format!("{}\n\n{}", context.phase_prompt, base_prompt)
+        } else {
+            format!("{}\n\n{}\n\n{}", context.phase_prompt, context.role_prompt, base_prompt)
+        };
         let system_prompt: &str = &system_prompt_owned;
         let user_message = context.to_user_message();
 
@@ -247,6 +272,66 @@ impl ModelRouter {
             Err(ModelError::Unavailable(
                 "No models available. Start Ollama or set ANTHROPIC_API_KEY.".to_string(),
             ))
+        }
+    }
+
+    /// Dual-pass routing: Gemma produces a fast draft, Claude refines it.
+    /// Falls back to single-model if either is unavailable.
+    async fn dual_pass(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+    ) -> Result<ReasoningOutput, ModelError> {
+        let gemma_available = self.gemma.is_available().await;
+        let claude_available = self.claude.is_available();
+
+        if !gemma_available && !claude_available {
+            return Err(ModelError::Unavailable(
+                "No models available for dual-pass.".to_string(),
+            ));
+        }
+        if !gemma_available {
+            return self.claude.reason(system_prompt, user_message, false).await;
+        }
+        if !claude_available {
+            return self.gemma.reason(system_prompt, user_message).await;
+        }
+
+        // Phase 1: Gemma draft
+        eprintln!("[grove] Dual-pass: Phase 1 — Gemma drafting");
+        let draft = match self.gemma.reason(system_prompt, user_message).await {
+            Ok(output) => output,
+            Err(_) => {
+                eprintln!("[grove] Dual-pass: Gemma draft failed, falling back to Claude only");
+                return self.claude.reason(system_prompt, user_message, false).await;
+            }
+        };
+
+        // Phase 2: Claude refines the Gemma draft
+        eprintln!("[grove] Dual-pass: Phase 2 — Claude refining (draft confidence: {:.2})", draft.confidence);
+        let draft_json = serde_json::to_string(&draft.blocks).unwrap_or_default();
+        let draft_summary = draft.session_summary.as_deref().unwrap_or("No summary");
+        let refinement_message = format!(
+            "{}\n\n--- DRAFT FROM LOCAL MODEL (refine, don't restart) ---\nDraft blocks: {}\nDraft summary: {}\nDraft confidence: {:.2}\n\nRefine this draft. Keep what's good, improve what's weak. Return JSON only.",
+            user_message, draft_json, draft_summary, draft.confidence
+        );
+
+        match self.claude.reason(system_prompt, &refinement_message, false).await {
+            Ok(mut refined) => {
+                // Merge insights from both passes
+                let mut all_insights = draft.insights.unwrap_or_default();
+                if let Some(ref claude_insights) = refined.insights {
+                    all_insights.extend(claude_insights.clone());
+                }
+                if !all_insights.is_empty() {
+                    refined.insights = Some(all_insights);
+                }
+                Ok(refined)
+            }
+            Err(_) => {
+                eprintln!("[grove] Dual-pass: Claude refinement failed, using Gemma draft");
+                Ok(draft)
+            }
         }
     }
 

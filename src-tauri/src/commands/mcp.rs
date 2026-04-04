@@ -4,7 +4,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use super::memory;
+use crate::memory::working;
+use crate::memory::longterm;
 use crate::models::context::GroveContext;
+use crate::soul::parser::Soul;
+use crate::soul::evolution::RelationshipPhase;
 
 /// MCP tool definitions that Grove exposes
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +98,35 @@ fn grove_tools() -> Vec<McpToolDef> {
                 "required": []
             }),
         },
+        McpToolDef {
+            name: "grove_get_priority".to_string(),
+            description: "Get the user's current top priority based on ventures, deadlines, and recent activity".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        McpToolDef {
+            name: "grove_what_changed".to_string(),
+            description: "Get a summary of what changed since the last session — new facts, patterns, venture updates".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "max_entries": { "type": "number", "description": "Max number of recent changes to return (default 10)" }
+                },
+                "required": []
+            }),
+        },
+        McpToolDef {
+            name: "grove_get_focus".to_string(),
+            description: "Get the user's current focus state: relationship phase, active role, soul completeness, and recommended next actions".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
     ]
 }
 
@@ -166,6 +199,98 @@ pub fn handle_tool_call(name: &str, args: &Value) -> Result<Value, String> {
             let context: Value = serde_json::from_str(&context_str)
                 .map_err(|e| format!("Failed to parse context.json: {}", e))?;
             Ok(context)
+        }
+        "grove_get_priority" => {
+            let grove_dir = dirs::home_dir()
+                .ok_or("Could not find home directory")?
+                .join(".grove");
+            let context_str = std::fs::read_to_string(grove_dir.join("context.json"))
+                .map_err(|e| format!("Failed to read context.json: {}", e))?;
+            let context: Value = serde_json::from_str(&context_str)
+                .map_err(|e| format!("Failed to parse context.json: {}", e))?;
+
+            // Find highest priority venture
+            let ventures = context.get("ventures")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            let top_venture = ventures.iter()
+                .filter(|v| v.get("status").and_then(|s| s.as_str()) != Some("completed"))
+                .min_by_key(|v| v.get("priority").and_then(|p| p.as_u64()).unwrap_or(999))
+                .cloned();
+
+            // Get recent memory for context
+            let recent = working::recent_entries(500);
+
+            Ok(json!({
+                "top_venture": top_venture,
+                "active_ventures_count": ventures.iter()
+                    .filter(|v| v.get("status").and_then(|s| s.as_str()) != Some("completed"))
+                    .count(),
+                "recent_activity_snippet": recent.lines().take(5).collect::<Vec<_>>().join("\n"),
+            }))
+        }
+        "grove_what_changed" => {
+            let max_entries = args
+                .get("max_entries")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(10) as usize;
+
+            // Recent working memory entries
+            let recent = working::recent_entries(3000);
+            let entries: Vec<&str> = recent.split("### ")
+                .filter(|s| !s.trim().is_empty())
+                .take(max_entries)
+                .collect();
+
+            // Recent long-term pattern promotions
+            let lt_summary = longterm::context_summary();
+
+            // Recent facts
+            let mem = memory::read_memory_file().unwrap_or_default();
+            let recent_facts: Vec<_> = mem.facts.iter()
+                .filter(|f| f.superseded_by.is_none())
+                .rev()
+                .take(5)
+                .map(|f| json!({
+                    "category": f.category,
+                    "content": f.content,
+                    "confidence": f.confidence,
+                }))
+                .collect();
+
+            Ok(json!({
+                "recent_journal_entries": entries,
+                "longterm_patterns": lt_summary,
+                "recent_facts": recent_facts,
+                "total_sessions": mem.tuning.total_sessions,
+            }))
+        }
+        "grove_get_focus" => {
+            let grove_dir = dirs::home_dir()
+                .ok_or("Could not find home directory")?
+                .join(".grove");
+            let soul_raw = std::fs::read_to_string(grove_dir.join("soul.md"))
+                .unwrap_or_default();
+            let soul = Soul::parse(&soul_raw);
+            let mem = memory::read_memory_file().unwrap_or_default();
+            let phase = RelationshipPhase::from_metrics(
+                soul.completeness(),
+                mem.sessions.len() as u32,
+            );
+            let weak = soul.weak_sections(0.5);
+            let weak_names: Vec<&str> = weak.iter().map(|s| s.heading.as_str()).collect();
+
+            Ok(json!({
+                "soul_completeness": format!("{:.0}%", soul.completeness() * 100.0),
+                "relationship_phase": phase.display_name(),
+                "autonomy_level": phase.autonomy_level(),
+                "soul_gaps": weak_names,
+                "total_sessions": mem.sessions.len(),
+                "total_facts": mem.facts.len(),
+                "total_patterns": mem.patterns.len(),
+            }))
         }
         _ => Err(format!("Unknown tool: {}", name)),
     }

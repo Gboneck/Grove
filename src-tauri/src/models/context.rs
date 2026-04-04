@@ -2,6 +2,8 @@ use chrono::Local;
 use serde::Serialize;
 
 use crate::commands::memory;
+use crate::memory::working;
+use crate::memory::longterm;
 use crate::soul::parser::Soul;
 use crate::soul::evolution::RelationshipPhase;
 
@@ -29,6 +31,12 @@ pub struct GroveContext {
     pub phase_prompt: String,
     /// Weak soul sections that need enrichment
     pub soul_gaps: Vec<String>,
+    /// Cross-session memory journal (recent MEMORY.md entries)
+    pub working_memory: String,
+    /// Long-term patterns context
+    pub longterm_context: String,
+    /// Active role prompt modifier (from YAML role config)
+    pub role_prompt: String,
 }
 
 impl GroveContext {
@@ -156,6 +164,19 @@ impl GroveContext {
             .map(|s| s.heading.clone())
             .collect();
 
+        // Read cross-session memory journal (recent entries, capped at 2000 chars)
+        let working_memory_raw = working::recent_entries(2000);
+        let working_memory = if working_memory_raw.trim().is_empty()
+            || working_memory_raw.trim() == "# Memory Journal"
+        {
+            String::new()
+        } else {
+            format!("\n--- MEMORY JOURNAL (cross-session) ---\n{}", working_memory_raw)
+        };
+
+        // Read long-term patterns
+        let longterm_context = longterm::context_summary();
+
         let now = Local::now();
 
         Ok(GroveContext {
@@ -176,6 +197,9 @@ impl GroveContext {
             relationship_phase: phase.display_name().to_string(),
             phase_prompt: phase.system_prompt_modifier().to_string(),
             soul_gaps,
+            working_memory,
+            longterm_context,
+            role_prompt: String::new(), // Filled by caller when a role is active
         })
     }
 
@@ -211,7 +235,7 @@ Time since last session: {}
 
 --- ACCUMULATED INSIGHTS ---
 {}
-{}{}{}
+{}{}{}{}{}
 {}
 {}
 
@@ -228,6 +252,8 @@ Decide what to show. Return JSON only."#,
             self.semantic_facts,
             self.tuning_hints,
             self.plugin_data,
+            if self.working_memory.is_empty() { "" } else { &self.working_memory },
+            if self.longterm_context.is_empty() { "" } else { &self.longterm_context },
             self.conversation_history
                 .as_ref()
                 .map(|h| format!("\n--- CONVERSATION HISTORY ---\n{}", h))

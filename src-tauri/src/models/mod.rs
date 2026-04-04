@@ -28,6 +28,7 @@ pub enum ReasoningIntent {
     CreativeHelp(String),
     EmotionalSupport(String),
     StatusCheck,
+    DualPass(String),
 }
 
 impl ReasoningIntent {
@@ -48,6 +49,10 @@ impl ReasoningIntent {
         )
     }
 
+    pub fn requires_dual_pass(&self) -> bool {
+        matches!(self, ReasoningIntent::DualPass(_))
+    }
+
     pub fn label(&self) -> &str {
         match self {
             ReasoningIntent::ComposeUI => "compose_ui",
@@ -58,6 +63,7 @@ impl ReasoningIntent {
             ReasoningIntent::CreativeHelp(_) => "creative_help",
             ReasoningIntent::EmotionalSupport(_) => "emotional_support",
             ReasoningIntent::StatusCheck => "status_check",
+            ReasoningIntent::DualPass(_) => "dual_pass",
         }
     }
 }
