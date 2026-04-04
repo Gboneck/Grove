@@ -1,0 +1,45 @@
+{
+  "ventures": [
+    {
+      "name": "Grizzly Peak Landscape",
+      "status": "active",
+      "health": "yellow",
+      "priority": 1,
+      "nextAction": "EMBER door-to-door outreach in Berkeley hills",
+      "deadline": "2026-06-01",
+      "notes": "Revenue engine. Need to close first batch of clients."
+    },
+    {
+      "name": "Signal Blueprint",
+      "status": "active",
+      "health": "yellow",
+      "priority": 2,
+      "nextAction": "Find billable client work",
+      "notes": "AI consulting. Need pipeline."
+    },
+    {
+      "name": "Daemon",
+      "status": "building",
+      "health": "green",
+      "priority": 3,
+      "nextAction": "v0.2 presence builder",
+      "notes": "Portfolio piece. Don't let it consume all build time."
+    },
+    {
+      "name": "YardVision",
+      "status": "paused",
+      "health": "neutral",
+      "priority": 4,
+      "nextAction": "None — parked",
+      "notes": "Enterprise-ready but no go-to-market energy right now."
+    },
+    {
+      "name": "Grove OS",
+      "status": "building",
+      "health": "green",
+      "priority": 3,
+      "nextAction": "Ship v0.0.1 proof of concept",
+      "notes": "This project. Living code architecture."
+    }
+  ]
+}
