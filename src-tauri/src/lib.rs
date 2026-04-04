@@ -1,6 +1,10 @@
 mod commands;
 mod models;
 mod plugins;
+pub mod soul;
+pub mod heartbeat;
+pub mod autonomy;
+mod memory;
 
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
