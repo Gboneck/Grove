@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, memo } from "react";
 import type { Block } from "../lib/tauri";
 import { recordActionEngagement } from "../lib/tauri";
 import TextBlock from "./blocks/TextBlock";
@@ -67,7 +67,7 @@ function BlockWrapper({
   );
 }
 
-export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
+function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
   // Track the previous block count to know which are newly streamed
   const prevCountRef = useRef(0);
   const isStreaming = blocks.length !== prevCountRef.current;
@@ -184,3 +184,5 @@ export default function BlockRenderer({ blocks, onInput }: BlockRendererProps) {
     </div>
   );
 }
+
+export default memo(BlockRenderer);

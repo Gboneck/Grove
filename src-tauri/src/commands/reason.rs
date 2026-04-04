@@ -9,11 +9,16 @@ use super::autonomous;
 use super::logs::{write_reasoning_log, LogEntry};
 use super::memory;
 use super::reflection;
+use super::roles;
 use super::ventures;
+use crate::memory::working;
 use crate::commands::actions::PluginState;
 use crate::models::context::GroveContext;
 use crate::models::router::{ModelRouter, ModelStatus};
 use crate::models::{ModelSource, ReasoningIntent};
+use crate::soul::parser::Soul;
+use crate::soul::evolution::RelationshipPhase;
+use crate::autonomy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationTurn {
@@ -47,8 +52,15 @@ pub async fn reason(
     state: tauri::State<'_, RouterState>,
     conversation: tauri::State<'_, ConversationState>,
     plugin_state: tauri::State<'_, PluginState>,
+    role_state: tauri::State<'_, crate::RoleState>,
 ) -> Result<ReasonResponse, String> {
     let start = Instant::now();
+
+    // 0. Validate user input
+    let user_input = match user_input {
+        Some(raw) => Some(crate::security::validate_user_input(&raw)?),
+        None => None,
+    };
 
     // Run on_reason hooks
     {
@@ -68,6 +80,16 @@ pub async fn reason(
         let digest_ctx = reflection::digest_context();
         let reminders_ctx = reflection::reminders_context();
         context.plugin_data = format!("{}{}{}{}", plugin_data, actions_ctx, digest_ctx, reminders_ctx);
+    }
+
+    // Inject active role prompt
+    {
+        let active_role = role_state.0.lock().await;
+        if let Some(ref role_name) = *active_role {
+            if let Some(role) = roles::get_role(role_name) {
+                context.role_prompt = roles::role_prompt_modifier(&role);
+            }
+        }
     }
 
     // Generate weekly digest if needed (runs once per week)
@@ -163,12 +185,42 @@ pub async fn reason(
 
     let insights = output.insights.clone().unwrap_or_default();
 
-    memory::record_session(blocks_shown, user_input.as_deref(), &summary_text, insights).ok();
+    memory::record_session(blocks_shown, user_input.as_deref(), &summary_text, insights.clone()).ok();
 
     let source_str = match output.source {
         ModelSource::Local => "local",
         ModelSource::Cloud => "cloud",
     };
+
+    // 5b. Record to MEMORY.md journal (cross-session context)
+    working::record_session_summary(
+        user_input.as_deref(),
+        &summary_text,
+        source_str,
+        &insights,
+    ).ok();
+
+    // 5c. Run soul self-evolution engine (propose → judge → apply)
+    {
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem_data = memory::read_memory_file().unwrap_or_default();
+        let evo_phase = RelationshipPhase::from_metrics(
+            soul.completeness(),
+            mem_data.sessions.len() as u32,
+        );
+        match crate::soul::evolve::EvolutionEngine::run_cycle(&insights, evo_phase) {
+            Ok(applied) if !applied.is_empty() => {
+                for a in &applied {
+                    eprintln!("[grove:evolve] {}", a);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("[grove:evolve] Error: {}", e),
+        }
+    }
 
     // 6. Write reasoning log
     let log_entry = LogEntry {
@@ -184,9 +236,28 @@ pub async fn reason(
     };
     write_reasoning_log(&log_entry);
 
-    // 7. Execute autonomous actions from the model
+    // 7. Execute autonomous actions through autonomy gate
     let auto_action_results = if let Some(ref actions) = output.auto_actions {
-        let results = autonomous::execute_auto_actions(actions);
+        // Determine relationship phase for autonomy gating
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem = memory::read_memory_file().unwrap_or_default();
+        let phase = RelationshipPhase::from_metrics(
+            soul.completeness(),
+            mem.sessions.len() as u32,
+        );
+
+        let (approved, blocked) = autonomy::gate_actions(actions, phase);
+        for b in &blocked {
+            eprintln!("[grove:autonomy] {}", b);
+        }
+
+        let mut results = autonomous::execute_auto_actions(&approved);
+        for b in blocked {
+            results.push(b);
+        }
         for result in &results {
             eprintln!("[grove] Auto-action: {}", result);
         }
@@ -233,10 +304,17 @@ pub async fn reason_stream(
     state: tauri::State<'_, RouterState>,
     conversation: tauri::State<'_, ConversationState>,
     plugin_state: tauri::State<'_, PluginState>,
+    role_state: tauri::State<'_, crate::RoleState>,
 ) -> Result<ReasonResponse, String> {
     use tauri::Emitter;
 
     let start = Instant::now();
+
+    // 0. Validate user input
+    let user_input = match user_input {
+        Some(raw) => Some(crate::security::validate_user_input(&raw)?),
+        None => None,
+    };
 
     // Run on_reason hooks
     {
@@ -256,6 +334,16 @@ pub async fn reason_stream(
         let digest_ctx = reflection::digest_context();
         let reminders_ctx = reflection::reminders_context();
         context.plugin_data = format!("{}{}{}{}", plugin_data, actions_ctx, digest_ctx, reminders_ctx);
+    }
+
+    // Inject active role prompt
+    {
+        let active_role = role_state.0.lock().await;
+        if let Some(ref role_name) = *active_role {
+            if let Some(role) = roles::get_role(role_name) {
+                context.role_prompt = roles::role_prompt_modifier(&role);
+            }
+        }
     }
 
     // 2. Classify intent
@@ -348,12 +436,42 @@ pub async fn reason_stream(
         .collect();
 
     let insights = output.insights.clone().unwrap_or_default();
-    memory::record_session(blocks_shown, user_input.as_deref(), &summary_text, insights).ok();
+    memory::record_session(blocks_shown, user_input.as_deref(), &summary_text, insights.clone()).ok();
 
     let source_str = match output.source {
         ModelSource::Local => "local",
         ModelSource::Cloud => "cloud",
     };
+
+    // Record to MEMORY.md journal
+    working::record_session_summary(
+        user_input.as_deref(),
+        &summary_text,
+        source_str,
+        &insights,
+    ).ok();
+
+    // Run soul self-evolution engine (propose → judge → apply)
+    {
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem_data = memory::read_memory_file().unwrap_or_default();
+        let evo_phase = RelationshipPhase::from_metrics(
+            soul.completeness(),
+            mem_data.sessions.len() as u32,
+        );
+        match crate::soul::evolve::EvolutionEngine::run_cycle(&insights, evo_phase) {
+            Ok(applied) if !applied.is_empty() => {
+                for a in &applied {
+                    eprintln!("[grove:evolve] {}", a);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("[grove:evolve] Error: {}", e),
+        }
+    }
 
     let log_entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),
@@ -368,12 +486,25 @@ pub async fn reason_stream(
     };
     write_reasoning_log(&log_entry);
 
-    // Execute autonomous actions
+    // Execute autonomous actions through autonomy gate
     let auto_action_results = if let Some(ref actions) = output.auto_actions {
-        let results = autonomous::execute_auto_actions(actions);
-        for result in &results {
-            eprintln!("[grove] Auto-action: {}", result);
+        let soul_raw = std::fs::read_to_string(
+            dirs::home_dir().unwrap_or_default().join(".grove").join("soul.md")
+        ).unwrap_or_default();
+        let soul = Soul::parse(&soul_raw);
+        let mem = memory::read_memory_file().unwrap_or_default();
+        let phase = RelationshipPhase::from_metrics(
+            soul.completeness(),
+            mem.sessions.len() as u32,
+        );
+
+        let (approved, blocked) = autonomy::gate_actions(actions, phase);
+        for b in &blocked {
+            eprintln!("[grove:autonomy] {}", b);
         }
+
+        let mut results = autonomous::execute_auto_actions(&approved);
+        results.extend(blocked);
         results
     } else {
         Vec::new()

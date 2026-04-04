@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getFullMemory, getMemoryStats } from "../../lib/tauri";
+import Modal from "../Modal";
 
 interface MemoryPanelProps {
   isOpen: boolean;
@@ -47,8 +48,6 @@ export default function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
   const tabs: { id: Tab; label: string }[] = [
     { id: "sessions", label: "Sessions" },
     { id: "facts", label: "Facts" },
@@ -57,21 +56,9 @@ export default function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-grove-bg border border-grove-border rounded-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-grove-border">
-          <h2 className="text-lg font-display text-grove-accent">Memory</h2>
-          <button
-            onClick={onClose}
-            className="text-grove-text-secondary hover:text-grove-text-primary transition-colors"
-          >
-            close
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex gap-1 px-6 pt-3">
+    <Modal isOpen={isOpen} onClose={onClose} title="Memory">
+      {/* Tabs */}
+      <div className="flex gap-1 px-6 pt-3">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -242,7 +229,6 @@ export default function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

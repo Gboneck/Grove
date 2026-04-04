@@ -1,6 +1,8 @@
 import { ReactNode, useEffect, useState, useRef, useCallback } from "react";
 import ModelIndicator from "./ModelIndicator";
 import NavMenu from "./NavMenu";
+import DaemonOrb, { type OrbState } from "./DaemonOrb";
+import { RoleSwitcher } from "./RoleSwitcher";
 
 interface GroveShellProps {
   children: ReactNode;
@@ -102,18 +104,35 @@ export default function GroveShell({
   const accentClass =
     ACCENT_OVERRIDES[ambientMood || "focused"] || "text-grove-accent";
 
+  // Derive orb state from app state
+  const orbState: OrbState = isLoading
+    ? "thinking"
+    : inputFocused
+      ? "listening"
+      : ambientMood === "urgent"
+        ? "alert"
+        : ambientMood === "reflective"
+          ? "reflecting"
+          : modelSource === null
+            ? "offline"
+            : "idle";
+
   return (
     <div className={`min-h-screen flex flex-col transition-colors duration-1000 ${themeClass}`}>
+      {/* Grain overlay */}
+      <div className="grain-overlay" />
+
       {/* Top bar */}
       <header className="sticky top-0 z-10 bg-grove-bg/80 backdrop-blur-md border-b border-grove-border">
         <div className="max-w-[640px] mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <DaemonOrb state={orbState} size="sm" />
             <span
               className={`font-semibold tracking-wide font-display transition-colors duration-1000 ${accentClass}`}
             >
               Grove
             </span>
-            <span className="text-gray-600 text-sm">v0.7</span>
+            <span className="text-gray-600 text-sm">v1.1</span>
             {hasUpdate && (
               <button
                 onClick={() => onAcknowledgeUpdate?.()}
@@ -126,6 +145,7 @@ export default function GroveShell({
             )}
           </div>
           <div className="flex items-center gap-3">
+            <RoleSwitcher />
             <ModelIndicator lastSource={modelSource} />
             <span className="text-sm text-grove-text-secondary font-mono">
               {timeStr}

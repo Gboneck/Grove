@@ -1,6 +1,11 @@
 mod commands;
 mod models;
 mod plugins;
+pub mod soul;
+pub mod heartbeat;
+pub mod autonomy;
+pub mod memory;
+pub mod security;
 
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -19,6 +24,7 @@ use commands::{
         clear_conversation, get_model_status, reason, reason_stream, set_model_mode,
         ConversationState, RouterState,
     },
+    roles::{list_roles, get_active_role, set_active_role},
     setup::{check_setup, save_api_key},
     soul::{read_soul, write_soul},
     system::get_system_info,
@@ -31,6 +37,18 @@ use models::{ReasoningIntent, ModelSource};
 use plugins::loader;
 use plugins::registry::PluginRegistry;
 
+use memory::ephemeral::EphemeralMemory;
+use soul::evolve::{get_evolution_proposals, apply_evolution};
+
+/// Shared ephemeral memory state for the current session.
+pub struct EphemeralState(pub Arc<Mutex<EphemeralMemory>>);
+
+/// Active reasoning role state (e.g., "builder", "reflector").
+pub struct RoleState(pub Arc<Mutex<Option<String>>>);
+
+/// Shared heartbeat state.
+pub struct HeartbeatStateWrapper(pub Arc<heartbeat::HeartbeatState>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize ~/.grove/ directory and default files
@@ -41,6 +59,8 @@ pub fn run() {
     config::ensure_config();
     loader::ensure_plugins_dir();
     commands::profiles::ensure_profiles_dir();
+    memory::working::ensure_memory_md();
+    memory::longterm::ensure_longterm_dir();
 
     // Load .env from ~/.grove/.env if it exists
     let grove_env = dirs::home_dir()
@@ -53,6 +73,7 @@ pub fn run() {
     // Load config and create model router
     let grove_config = config::load_config();
     let periodic_minutes = grove_config.models.periodic_reasoning_minutes;
+    let heartbeat_interval = grove_config.models.periodic_reasoning_minutes.max(1) * 60; // reuse config
     let router = ModelRouter::new(grove_config);
     let router_state = RouterState(Arc::new(Mutex::new(router)));
 
@@ -72,12 +93,31 @@ pub fn run() {
     // Initialize conversation state
     let conversation_state = ConversationState(Arc::new(Mutex::new(Vec::new())));
 
+    // Initialize ephemeral memory for this session
+    let ephemeral_state = EphemeralState(Arc::new(Mutex::new(EphemeralMemory::new())));
+
+    // Initialize role state (no active role by default)
+    let role_state = RoleState(Arc::new(Mutex::new(None)));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(router_state)
         .manage(plugin_state)
         .manage(conversation_state)
+        .manage(ephemeral_state)
+        .manage(role_state)
         .setup(move |app| {
+            // Start the heartbeat background loop
+            let grove_dir = dirs::home_dir()
+                .expect("No home directory")
+                .join(".grove");
+            let hb_state = heartbeat::start_heartbeat(
+                grove_dir,
+                heartbeat_interval, // tick interval in seconds
+                5,                  // observation threshold
+            );
+            eprintln!("[grove] Heartbeat started: {}s interval", heartbeat_interval);
+
             // Start periodic reasoning timer if configured
             if periodic_minutes > 0 {
                 let router_arc = app.state::<RouterState>().0.clone();
@@ -123,6 +163,15 @@ pub fn run() {
                                         || b.get("icon").and_then(|v| v.as_str()) == Some("alert")
                                         || output.ambient_mood.as_deref() == Some("urgent")
                                 });
+
+                                // Record to MEMORY.md
+                                let insights = output.insights.clone().unwrap_or_default();
+                                memory::working::record_session_summary(
+                                    None,
+                                    &output.session_summary.as_deref().unwrap_or("Periodic reasoning"),
+                                    source_str,
+                                    &insights,
+                                ).ok();
 
                                 let payload = serde_json::json!({
                                     "blocks": output.blocks,
@@ -188,6 +237,11 @@ pub fn run() {
             mcp_call_tool,
             get_weekly_digest,
             generate_and_save_digest,
+            list_roles,
+            get_active_role,
+            set_active_role,
+            get_evolution_proposals,
+            apply_evolution,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
