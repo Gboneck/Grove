@@ -4,6 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use crate::commands::actions::PluginState;
+
 fn grove_dir() -> PathBuf {
     dirs::home_dir()
         .expect("Could not find home directory")
@@ -42,4 +44,14 @@ pub async fn get_file_stamps() -> Result<FileStamps, String> {
     }
 
     Ok(FileStamps { files })
+}
+
+/// Called by the frontend when it detects a file change, to run on_file_change hooks
+#[tauri::command]
+pub async fn notify_file_change(
+    plugin_state: tauri::State<'_, PluginState>,
+) -> Result<(), String> {
+    let registry = plugin_state.0.lock().await;
+    registry.run_hook("on_file_change");
+    Ok(())
 }

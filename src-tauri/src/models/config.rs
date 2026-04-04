@@ -34,6 +34,8 @@ pub struct ModelsConfig {
     pub offline_mode: bool,
     #[serde(default = "default_true")]
     pub escalation_logging: bool,
+    #[serde(default)]
+    pub periodic_reasoning_minutes: u64, // 0 = disabled
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +71,7 @@ impl Default for GroveConfig {
                 prefer_local: true,
                 offline_mode: false,
                 escalation_logging: true,
+                periodic_reasoning_minutes: 0,
             },
             paths: PathsConfig {
                 soul_md: default_soul_path(),
@@ -94,6 +97,7 @@ cloud_api_key_env = "ANTHROPIC_API_KEY"  # reads from env var
 prefer_local = true          # default to Gemma when possible
 offline_mode = false          # force local-only
 escalation_logging = true     # log when/why Claude is called
+periodic_reasoning_minutes = 0  # 0 = disabled, e.g. 15 = re-reason every 15 min
 
 [paths]
 soul_md = "~/.grove/soul.md"

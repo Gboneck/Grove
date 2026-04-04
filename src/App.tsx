@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import GroveShell from "./components/GroveShell";
 import BlockRenderer from "./components/BlockRenderer";
 import LoadingState from "./components/LoadingState";
@@ -6,6 +7,8 @@ import SetupScreen from "./components/SetupScreen";
 import SoulEditor from "./components/SoulEditor";
 import MemoryPanel from "./components/panels/MemoryPanel";
 import LogsPanel from "./components/panels/LogsPanel";
+import PluginPanel from "./components/panels/PluginPanel";
+import ProfilePanel from "./components/panels/ProfilePanel";
 import {
   reason as invokeReason,
   checkSetup,
@@ -15,6 +18,7 @@ import {
   SetupStatus,
   FileStamps,
 } from "./lib/tauri";
+import { invoke } from "@tauri-apps/api/core";
 
 const FALLBACK_BLOCKS: Block[] = [
   {
@@ -47,6 +51,8 @@ export default function App() {
   const [soulEditorOpen, setSoulEditorOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [profilesOpen, setProfilesOpen] = useState(false);
   const lastStampsRef = useRef<FileStamps | null>(null);
 
   // Check setup on mount
@@ -98,6 +104,29 @@ export default function App() {
     }
   }, [phase, reason]);
 
+  // Listen for periodic reasoning events from the background timer
+  useEffect(() => {
+    const unlisten = listen<{
+      blocks: Block[];
+      timestamp: string;
+      model_source: string;
+      ambient_mood: string | null;
+      theme_hint: string | null;
+    }>("periodic-reasoning", (event) => {
+      const data = event.payload;
+      if (data.blocks && Array.isArray(data.blocks)) {
+        setBlocks(data.blocks);
+        setLastUpdated(new Date());
+        setModelSource(data.model_source as "local" | "cloud");
+        setAmbientMood(data.ambient_mood);
+        setThemeHint(data.theme_hint);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Poll ~/.grove/ files for external changes every 10s
   useEffect(() => {
     if (phase !== "running") return;
@@ -115,6 +144,8 @@ export default function App() {
           const prevTime = prev.files[file];
           if (prevTime !== undefined && prevTime !== mtime) {
             console.log(`[grove] ${file} changed externally, re-reasoning`);
+            // Notify backend for on_file_change hooks
+            invoke("notify_file_change").catch(() => {});
             reason();
             return;
           }
@@ -162,6 +193,8 @@ export default function App() {
         onOpenSoul={() => setSoulEditorOpen(true)}
         onOpenMemory={() => setMemoryOpen(true)}
         onOpenLogs={() => setLogsOpen(true)}
+        onOpenPlugins={() => setPluginsOpen(true)}
+        onOpenProfiles={() => setProfilesOpen(true)}
         isLoading={isLoading}
         lastUpdated={lastUpdated}
         modelSource={modelSource}
@@ -188,6 +221,18 @@ export default function App() {
       <LogsPanel
         isOpen={logsOpen}
         onClose={() => setLogsOpen(false)}
+      />
+      <PluginPanel
+        isOpen={pluginsOpen}
+        onClose={() => setPluginsOpen(false)}
+      />
+      <ProfilePanel
+        isOpen={profilesOpen}
+        onClose={() => setProfilesOpen(false)}
+        onSwitch={() => {
+          clearConversation().catch(() => {});
+          reason();
+        }}
       />
     </>
   );

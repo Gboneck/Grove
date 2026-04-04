@@ -143,6 +143,16 @@ impl PluginRegistry {
         &self.plugins
     }
 
+    /// Set a plugin's enabled state by name
+    pub fn set_plugin_enabled(&mut self, name: &str, enabled: bool) -> bool {
+        if let Some(plugin) = self.plugins.iter_mut().find(|p| p.name == name) {
+            plugin.enabled = enabled;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Get plugin summaries for the reasoning engine
     pub fn plugins_context(&self) -> String {
         if self.plugins.is_empty() {

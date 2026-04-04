@@ -7,6 +7,8 @@ interface GroveShellProps {
   onOpenSoul: () => void;
   onOpenMemory: () => void;
   onOpenLogs: () => void;
+  onOpenPlugins: () => void;
+  onOpenProfiles: () => void;
   isLoading: boolean;
   lastUpdated: Date | null;
   modelSource: "local" | "cloud" | null;
@@ -35,6 +37,8 @@ export default function GroveShell({
   onOpenSoul,
   onOpenMemory,
   onOpenLogs,
+  onOpenPlugins,
+  onOpenProfiles,
   isLoading,
   lastUpdated,
   modelSource,
@@ -89,6 +93,20 @@ export default function GroveShell({
               title="Reasoning Logs"
             >
               logs
+            </button>
+            <button
+              onClick={onOpenPlugins}
+              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
+              title="Manage Plugins"
+            >
+              plugins
+            </button>
+            <button
+              onClick={onOpenProfiles}
+              className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors"
+              title="Switch Profile"
+            >
+              profile
             </button>
             <button
               onClick={onOpenSoul}

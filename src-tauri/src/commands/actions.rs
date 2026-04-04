@@ -29,7 +29,7 @@ pub async fn execute_action(
 
     drop(registry); // Release lock before executing
 
-    match action.executor.as_str() {
+    let result = match action.executor.as_str() {
         "clipboard" => {
             let text = params
                 .and_then(|p| p.get("text").and_then(|t| t.as_str().map(String::from)))
@@ -139,7 +139,15 @@ pub async fn execute_action(
             })
         }
         other => Err(format!("Unknown executor type: {}", other)),
+    };
+
+    // Run on_action hooks after successful execution
+    if result.is_ok() {
+        let registry = plugin_state.0.lock().await;
+        registry.run_hook("on_action");
     }
+
+    result
 }
 
 #[tauri::command]
@@ -160,4 +168,66 @@ pub async fn list_actions(
         })
         .collect();
     Ok(actions)
+}
+
+#[tauri::command]
+pub async fn list_plugins(
+    plugin_state: tauri::State<'_, PluginState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let registry = plugin_state.0.lock().await;
+    let plugins: Vec<serde_json::Value> = registry
+        .all_plugins()
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "name": p.name,
+                "version": p.version,
+                "description": p.description,
+                "enabled": p.enabled,
+                "actions_count": p.actions.len(),
+                "blocks_count": p.blocks.len(),
+                "data_sources_count": p.data_sources.len(),
+            })
+        })
+        .collect();
+    Ok(plugins)
+}
+
+#[tauri::command]
+pub async fn set_plugin_enabled(
+    name: String,
+    enabled: bool,
+    plugin_state: tauri::State<'_, PluginState>,
+) -> Result<(), String> {
+    let mut registry = plugin_state.0.lock().await;
+    if !registry.set_plugin_enabled(&name, enabled) {
+        return Err(format!("Plugin '{}' not found", name));
+    }
+
+    // Also update the TOML file on disk
+    let plugins_dir = dirs::home_dir()
+        .ok_or("Could not find home directory")?
+        .join(".grove")
+        .join("plugins");
+
+    if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if content.contains(&format!("name = \"{}\"", name)) {
+                        let updated = if enabled {
+                            content.replace("enabled = false", "enabled = true")
+                        } else {
+                            content.replace("enabled = true", "enabled = false")
+                        };
+                        std::fs::write(&path, updated).ok();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
