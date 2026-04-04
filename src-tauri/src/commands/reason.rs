@@ -10,6 +10,7 @@ use super::logs::{write_reasoning_log, LogEntry};
 use super::memory;
 use super::reflection;
 use super::ventures;
+use crate::memory::working;
 use crate::commands::actions::PluginState;
 use crate::models::context::GroveContext;
 use crate::models::router::{ModelRouter, ModelStatus};
@@ -163,12 +164,20 @@ pub async fn reason(
 
     let insights = output.insights.clone().unwrap_or_default();
 
-    memory::record_session(blocks_shown, user_input.as_deref(), &summary_text, insights).ok();
+    memory::record_session(blocks_shown, user_input.as_deref(), &summary_text, insights.clone()).ok();
 
     let source_str = match output.source {
         ModelSource::Local => "local",
         ModelSource::Cloud => "cloud",
     };
+
+    // 5b. Record to MEMORY.md journal (cross-session context)
+    working::record_session_summary(
+        user_input.as_deref(),
+        &summary_text,
+        source_str,
+        &insights,
+    ).ok();
 
     // 6. Write reasoning log
     let log_entry = LogEntry {
@@ -348,12 +357,20 @@ pub async fn reason_stream(
         .collect();
 
     let insights = output.insights.clone().unwrap_or_default();
-    memory::record_session(blocks_shown, user_input.as_deref(), &summary_text, insights).ok();
+    memory::record_session(blocks_shown, user_input.as_deref(), &summary_text, insights.clone()).ok();
 
     let source_str = match output.source {
         ModelSource::Local => "local",
         ModelSource::Cloud => "cloud",
     };
+
+    // Record to MEMORY.md journal
+    working::record_session_summary(
+        user_input.as_deref(),
+        &summary_text,
+        source_str,
+        &insights,
+    ).ok();
 
     let log_entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),
