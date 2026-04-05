@@ -19,10 +19,10 @@ use commands::{
     mcp::{mcp_call_tool, mcp_list_tools},
     memory::{get_full_memory, get_memory, get_memory_stats, record_action_engagement},
     profiles::{create_profile, delete_profile, list_profiles, switch_profile},
-    reflection::{generate_and_save_digest, get_weekly_digest},
+    reflection::{generate_and_save_digest, get_weekly_digest, dismiss_reminder, snooze_reminder},
     reason::{
         clear_conversation, get_model_status, reason, reason_stream, set_model_mode,
-        ConversationState, RouterState,
+        record_prompt_copied, ConversationState, RouterState,
     },
     roles::{list_roles, get_active_role, set_active_role},
     setup::{check_setup, save_api_key},
@@ -30,6 +30,9 @@ use commands::{
     system::get_system_info,
     vector::{vector_status, vector_sync, vector_search},
     watch::{get_file_stamps, notify_file_change},
+    workspace::{
+        load_workspace, save_workspace, remove_artifact, WorkspaceState,
+    },
 };
 use models::config;
 use models::context::GroveContext;
@@ -55,6 +58,9 @@ pub struct RoleState(pub Arc<Mutex<Option<String>>>);
 /// Shared heartbeat state.
 pub struct HeartbeatStateWrapper(pub Arc<heartbeat::HeartbeatState>);
 
+/// Re-export ContextCache for use as managed state.
+pub use models::context::ContextCache;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize ~/.grove/ directory and default files
@@ -67,6 +73,7 @@ pub fn run() {
     commands::profiles::ensure_profiles_dir();
     memory::working::ensure_memory_md();
     memory::longterm::ensure_longterm_dir();
+    commands::system::ensure_system_md();
 
     // Load .env from ~/.grove/.env if it exists
     let grove_env = dirs::home_dir()
@@ -96,8 +103,14 @@ pub fn run() {
         eprintln!("[grove] Loaded {} plugin(s)", plugin_count);
     }
 
-    // Initialize conversation state
-    let conversation_state = ConversationState(Arc::new(Mutex::new(Vec::new())));
+    // Initialize conversation state — load from disk if recent
+    let prior_turns = commands::reason::load_conversation();
+    let conversation_state = ConversationState(Arc::new(Mutex::new(prior_turns)));
+
+    // Initialize workspace state — persistent canvas
+    let workspace = commands::workspace::load_workspace_from_disk();
+    let workspace_state = WorkspaceState(Arc::new(Mutex::new(workspace)));
+    eprintln!("[grove] Loaded workspace with {} artifacts", workspace_state.0.try_lock().map(|w| w.artifacts.len()).unwrap_or(0));
 
     // Initialize ephemeral memory for this session
     let ephemeral_state = EphemeralState(Arc::new(Mutex::new(EphemeralMemory::new())));
@@ -108,6 +121,9 @@ pub fn run() {
     // Initialize cycle counter for Qdrant sync debouncing
     let cycle_counter = CycleCounter(Arc::new(std::sync::atomic::AtomicU64::new(0)));
 
+    // Initialize context cache — pre-warmed on startup
+    let context_cache = ContextCache::new();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(router_state)
@@ -116,6 +132,8 @@ pub fn run() {
         .manage(ephemeral_state)
         .manage(role_state)
         .manage(cycle_counter)
+        .manage(context_cache)
+        .manage(workspace_state)
         .setup(move |app| {
             // Start the heartbeat background loop
             let grove_dir = dirs::home_dir()
@@ -125,8 +143,26 @@ pub fn run() {
                 grove_dir,
                 heartbeat_interval, // tick interval in seconds
                 5,                  // observation threshold
+                app.handle().clone(),
             );
             eprintln!("[grove] Heartbeat started: {}s interval", heartbeat_interval);
+
+            // Pre-warm the context cache in the background
+            {
+                use tauri::Manager;
+                let cache = app.state::<ContextCache>().0.clone();
+                tauri::async_runtime::spawn(async move {
+                    let start = std::time::Instant::now();
+                    match GroveContext::gather(None) {
+                        Ok(ctx) => {
+                            let mut c = cache.lock().await;
+                            *c = Some(ctx);
+                            eprintln!("[grove] Context cache warmed in {}ms", start.elapsed().as_millis());
+                        }
+                        Err(e) => eprintln!("[grove] Context pre-warm failed: {}", e),
+                    }
+                });
+            }
 
             // Start periodic reasoning timer if configured
             if periodic_minutes > 0 {
@@ -183,6 +219,32 @@ pub fn run() {
                                     &insights,
                                 ).ok();
 
+                                // Save as pending thought for next interactive session
+                                {
+                                    let thought_path = dirs::home_dir()
+                                        .unwrap_or_default()
+                                        .join(".grove")
+                                        .join("pending_thoughts.json");
+                                    let mut thoughts: Vec<serde_json::Value> = std::fs::read_to_string(&thought_path)
+                                        .ok()
+                                        .and_then(|c| serde_json::from_str(&c).ok())
+                                        .unwrap_or_default();
+                                    thoughts.push(serde_json::json!({
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        "summary": output.session_summary,
+                                        "insights": insights,
+                                        "blocks": output.blocks,
+                                        "model_source": source_str,
+                                    }));
+                                    // Keep last 5 thoughts
+                                    if thoughts.len() > 5 {
+                                        thoughts = thoughts[thoughts.len()-5..].to_vec();
+                                    }
+                                    if let Ok(json) = serde_json::to_string_pretty(&thoughts) {
+                                        std::fs::write(&thought_path, json).ok();
+                                    }
+                                }
+
                                 let payload = serde_json::json!({
                                     "blocks": output.blocks,
                                     "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -193,15 +255,7 @@ pub fn run() {
                                 });
                                 handle.emit("periodic-reasoning", &payload).ok();
 
-                                // Send desktop notification
-                                use tauri_plugin_notification::NotificationExt;
-                                let title = if has_urgent { "Grove — Needs Attention" } else { "Grove" };
-                                handle.notification()
-                                    .builder()
-                                    .title(title)
-                                    .body(&notif_body)
-                                    .show()
-                                    .ok();
+                                // Desktop notifications disabled — they interrupt reading
                             }
                             Err(e) => {
                                 eprintln!("[grove] Periodic reasoning failed: {}", e);
@@ -247,6 +301,8 @@ pub fn run() {
             mcp_call_tool,
             get_weekly_digest,
             generate_and_save_digest,
+            dismiss_reminder,
+            snooze_reminder,
             list_roles,
             get_active_role,
             set_active_role,
@@ -257,6 +313,10 @@ pub fn run() {
             vector_search,
             get_enrichment_prompts,
             answer_enrichment,
+            load_workspace,
+            save_workspace,
+            remove_artifact,
+            record_prompt_copied,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

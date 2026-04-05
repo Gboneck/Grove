@@ -182,6 +182,46 @@ export async function getWeeklyDigest(): Promise<unknown> {
   return invoke<unknown>("get_weekly_digest");
 }
 
+// Workspace persistence — artifacts
+export interface Artifact {
+  id: string;
+  name: string;
+  artifact_type: string;
+  content: {
+    blocks: Array<Record<string, unknown>>;
+    summary: string | null;
+  };
+  created_at: string;
+  updated_at: string;
+  update_count: number;
+}
+
+export interface WorkspaceData {
+  last_saved: string;
+  artifacts: Artifact[];
+}
+
+export async function loadWorkspace(): Promise<WorkspaceData> {
+  return invoke<WorkspaceData>("load_workspace");
+}
+
+export async function saveWorkspace(artifacts: Artifact[]): Promise<void> {
+  return invoke<void>("save_workspace", { artifacts });
+}
+
+export async function removeArtifact(id: string): Promise<void> {
+  return invoke<void>("remove_artifact", { id });
+}
+
+// Reminders
+export async function dismissReminder(id: string): Promise<void> {
+  return invoke<void>("dismiss_reminder", { id });
+}
+
+export async function snoozeReminder(id: string, until: string): Promise<void> {
+  return invoke<void>("snooze_reminder", { id, until });
+}
+
 // Roles
 export interface Role {
   name: string;

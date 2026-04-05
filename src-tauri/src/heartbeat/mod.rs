@@ -1,6 +1,7 @@
 pub mod observer;
 pub mod patterns;
 pub mod scheduler;
+pub mod screen;
 
 use observer::Observer;
 use patterns::PatternDetector;
@@ -17,12 +18,17 @@ pub struct HeartbeatState {
 
 /// Create the heartbeat components and start the background loop.
 /// Returns the shared state and spawns the tokio task.
-pub fn start_heartbeat(
+pub fn start_heartbeat<R: tauri::Runtime>(
     grove_dir: PathBuf,
     tick_interval_secs: u64,
     queue_threshold: usize,
-) -> HeartbeatState {
+    app_handle: tauri::AppHandle<R>,
+) -> HeartbeatState
+where
+    R: 'static,
+{
     let observer = Observer::new(grove_dir).start_watching();
+    let screen_observer = screen::ScreenObserver::new(30); // Capture every 30 seconds
     let scheduler = Arc::new(Mutex::new(HeartbeatScheduler::new(
         tick_interval_secs,
         queue_threshold,
@@ -44,7 +50,7 @@ pub fn start_heartbeat(
     let tick_secs = tick_interval_secs;
 
     // Spawn the background heartbeat loop
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let interval_duration = std::time::Duration::from_secs(tick_secs);
         let mut interval = tokio::time::interval(interval_duration);
         interval.tick().await; // Skip first immediate tick
@@ -54,8 +60,13 @@ pub fn start_heartbeat(
         loop {
             interval.tick().await;
 
-            // 1. Run observer tick
-            let observations = observer.tick();
+            // 1. Run observer tick (files, time, deadlines)
+            let mut observations = observer.tick();
+
+            // 1b. Screen observation (app, window title, OCR text)
+            if let Some(screen_obs) = screen_observer.tick() {
+                observations.push(screen_obs);
+            }
 
             if !observations.is_empty() {
                 eprintln!(
@@ -63,6 +74,20 @@ pub fn start_heartbeat(
                     observations.len()
                 );
                 total_observations.extend(observations.clone());
+
+                // Refresh context cache when files change
+                {
+                    use tauri::Manager;
+                    if let Some(cache) = app_handle.try_state::<crate::ContextCache>() {
+                        let arc = cache.0.clone();
+                        tokio::spawn(async move {
+                            match crate::models::context::GroveContext::gather(None) {
+                                Ok(ctx) => { *arc.lock().await = Some(ctx); }
+                                Err(_) => {}
+                            }
+                        });
+                    }
+                }
 
                 // 2. Push to scheduler
                 let mut sched = sched_clone.lock().await;
@@ -91,6 +116,18 @@ pub fn start_heartbeat(
                     // Write observation summary to MEMORY.md
                     let summary = build_observation_summary(&drained);
                     append_to_memory_md(&summary).ok();
+
+                    // Emit event so frontend can auto-trigger reasoning
+                    {
+                        use tauri::Emitter;
+                        let payload = serde_json::json!({
+                            "observation_count": drained.len(),
+                            "summary": summary,
+                            "has_deadline": drained.iter().any(|o| matches!(o.kind, observer::ObservationKind::DeadlineApproaching)),
+                            "has_time_shift": drained.iter().any(|o| matches!(o.kind, observer::ObservationKind::TimeShift)),
+                        });
+                        app_handle.emit("heartbeat-reason-trigger", &payload).ok();
+                    }
                 }
             } else {
                 // Still count the tick

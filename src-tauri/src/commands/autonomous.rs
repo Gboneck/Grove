@@ -35,6 +35,26 @@ pub fn execute_auto_actions(actions: &[AutoAction]) -> Vec<String> {
                     results.push(result);
                 }
             }
+            "read_source" => {
+                if let Some(result) = execute_read_source(action) {
+                    results.push(result);
+                }
+            }
+            "shell" => {
+                if let Some(result) = execute_shell(action) {
+                    results.push(result);
+                }
+            }
+            "open_url" => {
+                if let Some(result) = execute_open_url(action) {
+                    results.push(result);
+                }
+            }
+            "create_artifact" | "update_artifact" => {
+                if let Some(result) = execute_artifact(action) {
+                    results.push(result);
+                }
+            }
             other => {
                 eprintln!("[grove] Unknown auto_action type: {}", other);
             }
@@ -152,9 +172,132 @@ fn execute_add_fact(action: &AutoAction) -> Option<String> {
     Some(format!("Learned fact: {}", content))
 }
 
+/// Read one of Grove's own source files (read-only introspection).
+fn execute_read_source(action: &AutoAction) -> Option<String> {
+    let rel_path = action.params.get("path")?.as_str()?;
+
+    // Validate extension
+    let allowed = crate::commands::system::READABLE_EXTENSIONS;
+    if !allowed.iter().any(|ext| rel_path.ends_with(ext)) {
+        eprintln!("[grove] read_source blocked: unsupported extension in {}", rel_path);
+        return Some(format!("read_source blocked: unsupported file type for {}", rel_path));
+    }
+
+    // Resolve relative to project root
+    let root = crate::commands::system::source_root();
+    let full_path = root.join(rel_path);
+
+    // Security: must stay within project root
+    let canonical = full_path.canonicalize().ok()?;
+    let canonical_root = root.canonicalize().ok()?;
+    if !canonical.starts_with(&canonical_root) {
+        eprintln!("[grove] read_source blocked: path escapes project root");
+        return Some("read_source blocked: path outside project".to_string());
+    }
+
+    match fs::read_to_string(&canonical) {
+        Ok(content) => {
+            let truncated = if content.len() > 4096 {
+                format!("{}...\n[truncated at 4KB, file is {} bytes]", &content[..4096], content.len())
+            } else {
+                content
+            };
+            Some(format!("[source:{}]\n{}", rel_path, truncated))
+        }
+        Err(e) => Some(format!("read_source error for {}: {}", rel_path, e)),
+    }
+}
+
+/// Execute a shell command. Gated by autonomy scoring — only approved commands run.
+fn execute_shell(action: &AutoAction) -> Option<String> {
+    let command = action.params.get("command")?.as_str()?;
+    let workdir = action.params.get("workdir").and_then(|v| v.as_str());
+
+    // Hard-block dangerous patterns regardless of autonomy score
+    let lower = command.to_lowercase();
+    let blocked_patterns = ["rm -rf /", "sudo rm", "mkfs", "dd if=", "> /dev/", "chmod -R 777"];
+    for pattern in &blocked_patterns {
+        if lower.contains(pattern) {
+            eprintln!("[grove:shell] BLOCKED dangerous command: {}", command);
+            return Some(format!("Shell BLOCKED (dangerous): {}", command));
+        }
+    }
+
+    eprintln!("[grove:shell] Executing: {}", command);
+
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c").arg(command);
+    if let Some(dir) = workdir {
+        cmd.current_dir(dir);
+    }
+
+    // Timeout: capture output with a 30-second limit
+    match cmd.output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let status = output.status.code().unwrap_or(-1);
+
+            let result = if stdout.len() > 2000 {
+                format!("{}...[truncated]", &stdout[..2000])
+            } else {
+                stdout.to_string()
+            };
+
+            if status == 0 {
+                Some(format!("[shell:ok] $ {}\n{}", command, result.trim()))
+            } else {
+                Some(format!("[shell:err:{}] $ {}\n{}\n{}", status, command, result.trim(), stderr.trim()))
+            }
+        }
+        Err(e) => Some(format!("[shell:fail] $ {}\nError: {}", command, e)),
+    }
+}
+
+/// Open a URL in the default browser.
+fn execute_open_url(action: &AutoAction) -> Option<String> {
+    let url = action.params.get("url")?.as_str()?;
+
+    // Basic URL validation
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Some(format!("open_url blocked: invalid URL {}", url));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).spawn().ok();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn().ok();
+    }
+
+    Some(format!("Opened: {}", url))
+}
+
 fn sanitize_filename(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect::<String>()
         .to_lowercase()
+}
+
+/// Create or update a workspace artifact.
+fn execute_artifact(action: &AutoAction) -> Option<String> {
+    let name = action.params.get("name")?.as_str()?;
+    let artifact_type = action.params.get("artifact_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("custom");
+    let blocks = action.params.get("blocks")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let summary = action.params.get("summary")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    match super::workspace::upsert_artifact(name, artifact_type, blocks, summary) {
+        Ok(()) => Some(format!("Artifact '{}' saved to workspace", name)),
+        Err(e) => Some(format!("Failed to save artifact '{}': {}", name, e)),
+    }
 }

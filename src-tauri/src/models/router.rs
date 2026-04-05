@@ -117,19 +117,10 @@ impl ModelRouter {
         self.mode = mode;
     }
 
-    /// Classify user input into an intent. Tries model-based classification first,
-    /// falls back to keyword heuristics if the model is unavailable or fails.
-    pub async fn classify_intent(&self, user_input: &str) -> ReasoningIntent {
-        // Try model-based classification if Gemma is available
-        if self.gemma.is_available().await {
-            if let Some(intent) = self.gemma.classify_intent(user_input).await {
-                eprintln!("[grove] Intent classified by model: {:?}", intent.label());
-                return intent;
-            }
-        }
-        // Fall back to heuristics
+    /// Classify user input into an intent using fast keyword heuristics.
+    pub fn classify_intent(&self, user_input: &str) -> ReasoningIntent {
         let intent = heuristic_classify(user_input);
-        eprintln!("[grove] Intent classified by heuristic: {:?}", intent.label());
+        eprintln!("[grove] Intent: {:?}", intent.label());
         intent
     }
 
@@ -138,8 +129,14 @@ impl ModelRouter {
         context: &GroveContext,
         intent: &ReasoningIntent,
     ) -> Result<ReasoningOutput, ModelError> {
-        let base_prompt = gemma::system_prompt();
-        let system_prompt_owned = if context.role_prompt.is_empty() {
+        let base_prompt = if context.is_first_meeting {
+            gemma::first_meeting_prompt()
+        } else {
+            gemma::system_prompt()
+        };
+        let system_prompt_owned = if context.is_first_meeting {
+            base_prompt.to_string()
+        } else if context.role_prompt.is_empty() {
             format!("{}\n\n{}", context.phase_prompt, base_prompt)
         } else {
             format!("{}\n\n{}\n\n{}", context.phase_prompt, context.role_prompt, base_prompt)
@@ -237,8 +234,15 @@ impl ModelRouter {
     where
         F: FnMut(Value) + Send,
     {
-        let base_prompt = gemma::system_prompt();
-        let system_prompt_owned = if context.role_prompt.is_empty() {
+        // First-meeting uses a completely different prompt
+        let base_prompt = if context.is_first_meeting {
+            gemma::first_meeting_prompt()
+        } else {
+            gemma::system_prompt()
+        };
+        let system_prompt_owned = if context.is_first_meeting {
+            base_prompt.to_string()
+        } else if context.role_prompt.is_empty() {
             format!("{}\n\n{}", context.phase_prompt, base_prompt)
         } else {
             format!("{}\n\n{}\n\n{}", context.phase_prompt, context.role_prompt, base_prompt)

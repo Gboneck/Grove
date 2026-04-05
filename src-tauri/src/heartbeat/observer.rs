@@ -19,6 +19,7 @@ pub enum ObservationKind {
     TimeShift,
     DeadlineApproaching,
     SystemState,
+    ScreenContext,
     Idle,
 }
 
@@ -93,15 +94,29 @@ impl Observer {
                     return;
                 }
 
-                // Filter out log files and temp files to avoid noise
+                // Filter out files that Grove writes to internally (avoid feedback loops)
                 let dominated_paths: Vec<String> = event
                     .paths
                     .iter()
                     .filter(|p| {
                         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        let path_str = p.to_string_lossy();
                         !name.ends_with(".log")
                             && !name.starts_with('.')
                             && !name.ends_with(".tmp")
+                            && name != "memory.md"
+                            && name != "MEMORY.md"
+                            && name != "memory.json"
+                            && name != "reminders.json"
+                            && name != "system.md"
+                            && name != "detected.json"
+                            && name != "screen_context.json"
+                            && name != "pending_thoughts.json"
+                            && name != "conversation.json"
+                            && name != "workspace.json"
+                            && name != "prompt_history.json"
+                            && !path_str.contains("reasoning_logs")
+                            && !path_str.contains("patterns")
                     })
                     .filter_map(|p| {
                         // Make path relative to grove_dir for readable detail

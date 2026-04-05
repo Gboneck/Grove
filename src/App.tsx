@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import GroveShell from "./components/GroveShell";
 import BlockRenderer from "./components/BlockRenderer";
 import LoadingState from "./components/LoadingState";
+import useWorkspace from "./hooks/useWorkspace";
+import WorkspaceCanvas from "./components/WorkspaceCanvas";
 import SetupScreen from "./components/SetupScreen";
 import SoulEditor from "./components/SoulEditor";
 import MemoryPanel from "./components/panels/MemoryPanel";
@@ -51,8 +53,10 @@ type AppPhase = "checking" | "setup" | "running";
 export default function App() {
   const [phase, setPhase] = useState<AppPhase>("checking");
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const workspace = useWorkspace();
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [reasonPhase, setReasonPhase] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState(false);
   const [modelSource, setModelSource] = useState<"local" | "cloud" | null>(
@@ -91,51 +95,94 @@ export default function App() {
         setPhase("running");
       });
 
-    // Request notification permission on startup
-    isPermissionGranted().then((granted) => {
-      if (!granted) {
-        requestPermission().catch(() => {});
-      }
-    }).catch(() => {});
+    // Notifications disabled — they interrupt the user
   }, []);
 
+  // Workspace artifacts load automatically via useWorkspace hook
+
   const streamingBlocksRef = useRef<Block[]>([]);
+  const reasoningRef = useRef(false); // Guard against concurrent reasoning
+  const lastReasonedRef = useRef(0); // Timestamp of last completed reasoning
+  const REASON_COOLDOWN_MS = 60000; // 60s minimum between auto-triggered reasoning
 
   const reason = useCallback(async (userInput?: string) => {
+    // Prevent concurrent reasoning calls
+    if (reasoningRef.current) return;
+    reasoningRef.current = true;
+
+    // User-initiated input replaces blocks; auto-triggered adds to them
+    const isUserInput = !!userInput;
+
     setIsLoading(true);
     setError(false);
-    setBlocks([]); // Clear blocks for streaming
-    streamingBlocksRef.current = [];
+    setReasonPhase(null);
 
-    // Listen for individual blocks as they stream in
+    if (isUserInput) {
+      // User asked something — clear canvas for fresh response
+      setBlocks([]);
+      streamingBlocksRef.current = [];
+    } else {
+      // Auto-triggered — keep existing blocks, new ones will append
+      streamingBlocksRef.current = [];
+    }
+
+    // Listen for individual blocks and progress events as they stream in
     let blockUnsub: (() => void) | null = null;
+    let progressUnsub: (() => void) | null = null;
     try {
       blockUnsub = await listen<Block>("reason-block", (event) => {
-        streamingBlocksRef.current = [...streamingBlocksRef.current, event.payload];
-        setBlocks([...streamingBlocksRef.current]);
+        // Tag each block with a unique ID for removal tracking
+        const tagged = { ...event.payload, _id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
+        streamingBlocksRef.current = [...streamingBlocksRef.current, tagged];
+        if (isUserInput) {
+          setBlocks([...streamingBlocksRef.current]);
+        } else {
+          // Additive — append to existing
+          setBlocks(prev => [...prev, tagged]);
+        }
       }).then(fn => { return fn; });
 
-      // This call returns when streaming is complete
+      progressUnsub = await listen<string>("reason-progress", (event) => {
+        setReasonPhase(event.payload);
+      }).then(fn => { return fn; });
+
       const response = await reasonStream(userInput);
 
-      // Use the final authoritative response (may have all blocks if streaming didn't emit)
       if (response.blocks && Array.isArray(response.blocks)) {
-        // Append enrichment prompts if in early phases
         try {
           const enrichment = await getEnrichmentPrompts();
           if (enrichment.length > 0) {
             response.blocks.push(...enrichment);
           }
         } catch {
-          // Enrichment is optional — ignore errors
+          // Enrichment is optional
         }
-        setBlocks(response.blocks);
+
+        // Tag final blocks with IDs
+        const taggedBlocks = response.blocks.map((b: Block) => ({
+          ...b,
+          _id: (b as Record<string, unknown>)._id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        }));
+
+        if (isUserInput) {
+          setBlocks(taggedBlocks);
+        } else {
+          // Additive: append final blocks
+          setBlocks(prev => {
+            const streamIds = new Set(streamingBlocksRef.current.map((b: Record<string, unknown>) => b._id));
+            const kept = prev.filter((b: Record<string, unknown>) => !streamIds.has(b._id));
+            return [...kept, ...taggedBlocks];
+          });
+        }
+
         setLastUpdated(new Date());
         setModelSource(response.model_source);
         setAmbientMood(response.ambient_mood);
         setThemeHint(response.theme_hint);
         setAutoActions(response.auto_action_results || []);
         setVentureUpdates(response.venture_update_results || []);
+        // Refresh artifacts — model may have created/updated them via auto-actions
+        refreshArtifactsAfterReason();
       } else {
         throw new Error("Invalid response structure");
       }
@@ -147,7 +194,11 @@ export default function App() {
       setModelSource(null);
     } finally {
       if (blockUnsub) blockUnsub();
+      if (progressUnsub) progressUnsub();
       setIsLoading(false);
+      setReasonPhase(null);
+      reasoningRef.current = false;
+      lastReasonedRef.current = Date.now();
     }
   }, []);
 
@@ -158,7 +209,29 @@ export default function App() {
     }
   }, [phase, reason]);
 
+  // Listen for heartbeat-triggered reasoning (proactive intelligence)
+  // Only auto-reasons if cooldown has elapsed — don't interrupt the user
+  useEffect(() => {
+    if (phase !== "running") return;
+    const unlisten = listen<{
+      observation_count: number;
+      summary: string;
+      has_deadline: boolean;
+      has_time_shift: boolean;
+    }>("heartbeat-reason-trigger", (event) => {
+      const elapsed = Date.now() - lastReasonedRef.current;
+      if (elapsed < REASON_COOLDOWN_MS) return; // Cooldown — don't interrupt
+      const data = event.payload;
+      reason(data.has_time_shift
+        ? "Time has shifted. Re-evaluate priorities for this part of the day."
+        : undefined
+      );
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [phase, reason]);
+
   // Listen for periodic reasoning events from the background timer
+  // Don't replace current blocks — just set the flag so user can pull when ready
   useEffect(() => {
     const unlisten = listen<{
       blocks: Block[];
@@ -167,16 +240,8 @@ export default function App() {
       ambient_mood: string | null;
       theme_hint: string | null;
       has_urgent: boolean;
-    }>("periodic-reasoning", (event) => {
-      const data = event.payload;
-      if (data.blocks && Array.isArray(data.blocks)) {
-        setBlocks(data.blocks);
-        setLastUpdated(new Date());
-        setModelSource(data.model_source as "local" | "cloud");
-        setAmbientMood(data.ambient_mood);
-        setThemeHint(data.theme_hint);
-        setHasPeriodicUpdate(true);
-      }
+    }>("periodic-reasoning", () => {
+      setHasPeriodicUpdate(true);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -217,11 +282,15 @@ export default function App() {
     { id: "evolution", label: "Soul Evolution", action: () => setEvolutionOpen(true) },
   ];
 
-  // Poll ~/.grove/ files for external changes every 10s
+  // Poll ~/.grove/ files for external changes every 30s (not 10s — avoid thrashing)
   useEffect(() => {
     if (phase !== "running") return;
 
     const pollInterval = setInterval(async () => {
+      // Don't trigger if already reasoning or in cooldown
+      if (reasoningRef.current) return;
+      if (Date.now() - lastReasonedRef.current < REASON_COOLDOWN_MS) return;
+
       try {
         const stamps = await getFileStamps();
         const prev = lastStampsRef.current;
@@ -229,12 +298,12 @@ export default function App() {
 
         if (!prev) return; // First poll, just save baseline
 
-        // Check if any file changed
+        // Check if soul.md or context.json changed (ignore memory/log files)
         for (const [file, mtime] of Object.entries(stamps.files)) {
+          if (!file.endsWith("soul.md") && !file.endsWith("context.json")) continue;
           const prevTime = prev.files[file];
           if (prevTime !== undefined && prevTime !== mtime) {
             console.log(`[grove] ${file} changed externally, re-reasoning`);
-            // Notify backend for on_file_change hooks
             invoke("notify_file_change").catch(() => {});
             reason();
             return;
@@ -243,7 +312,7 @@ export default function App() {
       } catch {
         // Ignore polling errors
       }
-    }, 10000);
+    }, 30000);
 
     return () => clearInterval(pollInterval);
   }, [phase, reason]);
@@ -251,6 +320,17 @@ export default function App() {
   const handleInput = (value: string) => {
     reason(value);
   };
+
+  const handleDismissBlock = useCallback((id: string) => {
+    setBlocks(prev => prev.filter((b: Record<string, unknown>) => b._id !== id));
+  }, []);
+
+  // After reasoning completes, refresh artifacts from disk (model may have created/updated them)
+  const refreshArtifactsAfterReason = useCallback(() => {
+    workspace.refresh();
+  }, [workspace]);
+
+  // Workspace canvas handles drag state internally
 
   const handleSetupComplete = () => {
     setPhase("running");
@@ -300,14 +380,29 @@ export default function App() {
           {error && blocks === FALLBACK_BLOCKS ? (
             <OfflineFallback />
           ) : (
-            <BlockRenderer blocks={blocks} onInput={handleInput} isLoading={isLoading} />
+            <>
+              {workspace.hasArtifacts && (
+                <WorkspaceCanvas
+                  artifacts={workspace.artifacts}
+                  onMove={workspace.moveArtifact}
+                  onResize={workspace.resizeArtifact}
+                  onRemove={workspace.removeArtifact}
+                  onCollapse={workspace.collapseArtifact}
+                />
+              )}
+              <div className="max-w-[720px] mx-auto">
+                <BlockRenderer blocks={blocks} onInput={handleInput} onDismissBlock={handleDismissBlock} isLoading={isLoading} />
+              </div>
+            </>
           )}
         </div>
-        {isLoading && blocks.length === 0 && <LoadingState />}
+        {isLoading && blocks.length === 0 && <LoadingState phase={reasonPhase} />}
         {isLoading && blocks.length > 0 && (
-          <div className="flex items-center gap-2 mt-4 text-sm text-grove-text-secondary animate-pulse">
-            <span className="w-1.5 h-1.5 rounded-full bg-grove-accent" />
-            streaming...
+          <div className="flex items-center gap-2 mt-4 text-sm text-grove-text-secondary">
+            <span className="w-1.5 h-1.5 rounded-full bg-grove-accent animate-pulse" />
+            <span className="streaming-dots font-mono">
+              <span>.</span><span>.</span><span>.</span>
+            </span>
           </div>
         )}
       </GroveShell>

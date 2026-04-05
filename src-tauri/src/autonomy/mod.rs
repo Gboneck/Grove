@@ -17,7 +17,7 @@ pub fn gate_actions(
     for action in actions {
         // First check category-level gate
         let cat_gate = match action.action_type.as_str() {
-            "note" | "add_fact" | "reminder" => category_gate("memory_update"),
+            "note" | "add_fact" | "reminder" | "read_source" => category_gate("memory_update"),
             "file_write" => {
                 // Check if path is within ~/.grove/
                 let path = action.params.get("path")
@@ -30,6 +30,7 @@ pub fn gate_actions(
                 }
             }
             "venture_status" => category_gate("ui_composition"),
+            "open_url" => category_gate("shell_command"), // Ask-gated
             "shell" => category_gate("shell_command"),
             "http" | "api_call" => category_gate("external_api"),
             "send_message" | "email" => category_gate("send_message"),
@@ -91,6 +92,8 @@ pub fn gate_actions(
 /// Score an individual action based on its type and parameters.
 fn score_action(action: &AutoAction) -> AutonomyScore {
     let (reversibility, scope) = match action.action_type.as_str() {
+        "read_source" => (1.0, 1.0), // Read-only, local only
+        "open_url" => (0.8, 0.6),   // Opens browser, visible but low-risk
         "note" => (1.0, 1.0),       // Can delete notes, local only
         "add_fact" => (0.9, 1.0),    // Can remove facts, local only
         "reminder" => (1.0, 1.0),    // Can dismiss reminders

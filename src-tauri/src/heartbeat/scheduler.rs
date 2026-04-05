@@ -110,6 +110,7 @@ impl ObservationKind {
             Self::TimeShift => "time",
             Self::DeadlineApproaching => "deadline",
             Self::SystemState => "system",
+            Self::ScreenContext => "screen",
             Self::Idle => "idle",
         }
     }

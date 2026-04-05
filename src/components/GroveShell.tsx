@@ -3,6 +3,7 @@ import ModelIndicator from "./ModelIndicator";
 import NavMenu from "./NavMenu";
 import DaemonOrb, { type OrbState } from "./DaemonOrb";
 import { RoleSwitcher } from "./RoleSwitcher";
+import Sidebar from "./Sidebar";
 
 interface GroveShellProps {
   children: ReactNode;
@@ -31,12 +32,30 @@ const THEME_CLASSES: Record<string, string> = {
   light: "bg-gradient-to-b from-[#0a0a0a] to-[#0f0f0f]",
 };
 
+// Time-of-day adjusts the background subtly
+function timeOfDayTheme(hour: number): string {
+  if (hour >= 5 && hour < 8) return "bg-gradient-to-b from-[#0a0a0a] to-[#0f0b08]"; // Early morning — warm amber
+  if (hour >= 8 && hour < 12) return "bg-gradient-to-b from-[#0a0a0a] to-[#0c0a08]"; // Morning — light warm
+  if (hour >= 12 && hour < 17) return "bg-gradient-to-b from-[#0a0a0a] to-[#0a0a0c]"; // Afternoon — neutral
+  if (hour >= 17 && hour < 21) return "bg-gradient-to-b from-[#0a0a0a] to-[#0a080c]"; // Evening — cool purple
+  return "bg-gradient-to-b from-[#0a0a0a] to-[#080808]"; // Night — deep dark
+}
+
 const ACCENT_OVERRIDES: Record<string, string> = {
   urgent: "text-grove-status-red",
   calm: "text-grove-accent",
   creative: "text-[#c084fc]",
   reflective: "text-[#60a5fa]",
   focused: "text-grove-accent",
+};
+
+// Ambient glow colors that bleed into header/footer borders
+const MOOD_GLOW: Record<string, string> = {
+  urgent: "rgba(248, 113, 113, 0.15)",
+  calm: "rgba(212, 168, 83, 0.08)",
+  creative: "rgba(192, 132, 252, 0.12)",
+  reflective: "rgba(96, 165, 250, 0.1)",
+  focused: "rgba(212, 168, 83, 0.1)",
 };
 
 export default function GroveShell({
@@ -61,6 +80,7 @@ export default function GroveShell({
   const [time, setTime] = useState(new Date());
   const [inputValue, setInputValue] = useState("");
   const [inputFocused, setInputFocused] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -71,10 +91,8 @@ export default function GroveShell({
   // Global Enter key — focus the input bar when nothing else is focused
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Don't capture if user is already in an input/textarea, or a panel/modal is open
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      // Don't capture if modifier keys are held (those are for shortcuts)
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (e.key === "Enter") {
@@ -94,13 +112,22 @@ export default function GroveShell({
     inputRef.current?.blur();
   }, [inputValue, onInput]);
 
+  const handleFocusVenture = useCallback((name: string) => {
+    onInput(`Focus on ${name} — what's the status and what should I do next?`);
+  }, [onInput]);
+
   const timeStr = time.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
 
-  const themeClass = THEME_CLASSES[themeHint || "dark"] || THEME_CLASSES.dark;
+  const dayStr = time.toLocaleDateString("en-US", { weekday: "long" });
+
+  const themeClass = themeHint
+    ? THEME_CLASSES[themeHint] || THEME_CLASSES.dark
+    : timeOfDayTheme(time.getHours());
+  const moodGlow = MOOD_GLOW[ambientMood || "focused"] || MOOD_GLOW.focused;
   const accentClass =
     ACCENT_OVERRIDES[ambientMood || "focused"] || "text-grove-accent";
 
@@ -118,21 +145,23 @@ export default function GroveShell({
             : "idle";
 
   return (
-    <div className={`min-h-screen flex flex-col transition-colors duration-1000 ${themeClass}`}>
+    <div className={`h-screen flex flex-col transition-colors duration-1000 ${themeClass}`}>
       {/* Grain overlay */}
       <div className="grain-overlay" />
 
       {/* Top bar */}
-      <header className="sticky top-0 z-10 bg-grove-bg/80 backdrop-blur-md border-b border-grove-border">
-        <div className="max-w-[640px] mx-auto px-6 py-4 flex items-center justify-between">
+      <header
+        className="sticky top-0 z-10 bg-grove-bg/80 backdrop-blur-xl border-b border-grove-border/30 transition-shadow duration-1000"
+        style={{ boxShadow: `0 1px 20px ${moodGlow}, 0 1px 8px rgba(0,0,0,0.4)` }}
+      >
+        <div className="px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <DaemonOrb state={orbState} size="sm" />
+            <DaemonOrb state={orbState} size="md" />
             <span
-              className={`font-semibold tracking-wide font-display transition-colors duration-1000 ${accentClass}`}
+              className={`font-semibold tracking-wide font-display text-lg transition-colors duration-1000 ${accentClass}`}
             >
               Grove
             </span>
-            <span className="text-gray-600 text-sm">v1.1</span>
             {hasUpdate && (
               <button
                 onClick={() => onAcknowledgeUpdate?.()}
@@ -144,15 +173,17 @@ export default function GroveShell({
               </button>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <RoleSwitcher />
             <ModelIndicator lastSource={modelSource} />
-            <span className="text-sm text-grove-text-secondary font-mono">
-              {timeStr}
-            </span>
+            <div className="text-sm text-grove-text-secondary font-mono">
+              <span>{timeStr}</span>
+              <span className="mx-1.5 opacity-40">·</span>
+              <span className="opacity-60">{dayStr}</span>
+            </div>
             <button
               onClick={onOpenSearch}
-              className="text-xs text-grove-text-secondary hover:text-grove-accent transition-colors px-2 py-1 rounded border border-grove-border hover:border-grove-accent/40"
+              className="text-xs text-grove-text-secondary hover:text-grove-accent transition-colors px-2 py-1 rounded border border-grove-border/50 hover:border-grove-accent/40"
               title="Search (Ctrl+/)"
             >
               search
@@ -172,68 +203,88 @@ export default function GroveShell({
               disabled={isLoading}
               className="text-sm text-grove-text-secondary hover:text-grove-accent transition-colors disabled:opacity-50"
             >
-              {isLoading ? "thinking…" : "refresh"}
+              {isLoading ? "thinking..." : "refresh"}
             </button>
           </div>
         </div>
       </header>
 
-      {/* Main content — pad bottom for sticky input bar */}
-      <main className="flex-1 max-w-[640px] mx-auto w-full px-6 py-8 pb-28">
-        {children}
-      </main>
+      {/* Body: Sidebar + Main */}
+      <div className="flex-1 flex overflow-hidden">
+        <div className={`transition-opacity duration-500 ${isLoading ? "opacity-50" : "opacity-100"}`}>
+          <Sidebar
+            onFocusVenture={handleFocusVenture}
+            isCollapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+        </div>
 
-      {/* Sticky input bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-10 bg-grove-bg/90 backdrop-blur-md border-t border-grove-border">
-        <div className="max-w-[640px] mx-auto px-6 py-3">
-          <div className={`flex gap-2 transition-all duration-200 ${inputFocused ? "opacity-100" : "opacity-60 hover:opacity-80"}`}>
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onFocus={() => setInputFocused(true)}
-              onBlur={() => setInputFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && inputValue.trim()) {
-                  handleInputSubmit();
-                } else if (e.key === "Escape") {
-                  setInputValue("");
-                  inputRef.current?.blur();
-                }
-              }}
-              placeholder={isLoading ? "thinking..." : "press Enter to talk to Grove..."}
-              disabled={isLoading}
-              className="flex-1 bg-grove-surface border border-grove-border rounded-lg px-4 py-2.5 text-sm text-grove-text-primary placeholder-gray-600 focus:outline-none focus:border-grove-accent/60 transition-colors disabled:opacity-50"
-            />
-            <button
-              onClick={handleInputSubmit}
-              disabled={isLoading || !inputValue.trim()}
-              className="bg-grove-accent text-grove-bg px-4 py-2.5 rounded-lg text-sm font-medium hover:brightness-110 transition-all disabled:opacity-40 disabled:hover:brightness-100"
-            >
-              send
-            </button>
+        {/* Main content area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <main className="flex-1 overflow-auto px-8 py-8 pb-28">
+            {children}
+          </main>
+
+          {/* Sticky input bar */}
+          <div
+            className="border-t border-grove-border/30 bg-grove-bg/90 backdrop-blur-xl transition-shadow duration-1000 px-8 py-3"
+            style={{ boxShadow: `0 -1px 20px ${moodGlow}, 0 -1px 8px rgba(0,0,0,0.4)` }}
+          >
+            <div className="max-w-[720px] mx-auto">
+              <div className={`flex gap-2 transition-all duration-200 ${inputFocused ? "opacity-100" : "opacity-60 hover:opacity-80"}`}>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && inputValue.trim()) {
+                      handleInputSubmit();
+                    } else if (e.key === "Escape") {
+                      setInputValue("");
+                      inputRef.current?.blur();
+                    }
+                  }}
+                  placeholder={isLoading ? "thinking..." : "talk to Grove or ask it to build something..."}
+                  disabled={isLoading}
+                  className={`flex-1 bg-grove-surface border rounded-lg px-4 py-2.5 text-sm text-grove-text-primary placeholder-gray-600 focus:outline-none transition-all disabled:opacity-50 disabled:grayscale font-sans ${
+                    inputValue.length > 0
+                      ? "border-grove-accent/60 shadow-[0_0_16px_rgba(212,168,83,0.2)]"
+                      : inputFocused
+                        ? "border-grove-accent/40 shadow-[0_0_12px_rgba(212,168,83,0.1)]"
+                        : "border-grove-border/50"
+                  }`}
+                />
+                <button
+                  onClick={handleInputSubmit}
+                  disabled={isLoading || !inputValue.trim()}
+                  className="bg-grove-accent text-grove-bg px-5 py-2.5 rounded-lg text-sm font-medium hover:brightness-110 transition-all disabled:opacity-40 disabled:hover:brightness-100 font-sans"
+                >
+                  send
+                </button>
+              </div>
+              {/* Status line */}
+              {lastUpdated && (
+                <p className="text-xs text-gray-600 mt-1.5 font-mono">
+                  {lastUpdated.toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    hour12: true,
+                  })}
+                  {modelSource && (
+                    <span className="ml-2">
+                      via {modelSource === "local" ? "gemma" : "claude"}
+                    </span>
+                  )}
+                  {ambientMood && (
+                    <span className="ml-2 opacity-60">· {ambientMood}</span>
+                  )}
+                </p>
+              )}
+            </div>
           </div>
-          {/* Status line */}
-          {lastUpdated && (
-            <p className="text-xs text-gray-600 mt-2">
-              last reasoned:{" "}
-              {lastUpdated.toLocaleTimeString("en-US", {
-                hour: "numeric",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: true,
-              })}
-              {modelSource && (
-                <span className="ml-2">
-                  via {modelSource === "local" ? "gemma" : "claude"}
-                </span>
-              )}
-              {ambientMood && (
-                <span className="ml-2">· {ambientMood}</span>
-              )}
-            </p>
-          )}
         </div>
       </div>
     </div>

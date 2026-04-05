@@ -22,30 +22,47 @@ pub struct SetupStatus {
 }
 
 fn get_system_ram_gb() -> u64 {
-    // Read from /proc/meminfo on Linux, fallback for other platforms
-    if let Ok(content) = fs::read_to_string("/proc/meminfo") {
-        for line in content.lines() {
-            if let Some(rest) = line.strip_prefix("MemTotal:") {
-                let kb: u64 = rest
-                    .trim()
-                    .split_whitespace()
-                    .next()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                return kb / 1_048_576; // KB to GB
+    // macOS: use sysctl
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        if let Ok(output) = Command::new("sysctl").arg("-n").arg("hw.memsize").output() {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                if let Ok(bytes) = s.trim().parse::<u64>() {
+                    return bytes / (1024 * 1024 * 1024); // bytes to GB
+                }
             }
         }
     }
-    // Fallback: assume 16GB
+
+    // Linux: read /proc/meminfo
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(content) = fs::read_to_string("/proc/meminfo") {
+            for line in content.lines() {
+                if let Some(rest) = line.strip_prefix("MemTotal:") {
+                    let kb: u64 = rest
+                        .trim()
+                        .split_whitespace()
+                        .next()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    return kb / 1_048_576; // KB to GB
+                }
+            }
+        }
+    }
+
+    // Fallback
     16
 }
 
 fn recommend_model(ram_gb: u64) -> &'static str {
     match ram_gb {
-        0..=7 => "gemma4:e2b",
-        8..=15 => "gemma4:e4b",
-        16..=31 => "gemma4:27b-it-qat",
-        _ => "gemma4:27b-it-qat",
+        0..=7 => "gemma3:1b",
+        8..=15 => "gemma3:4b",
+        16..=31 => "gemma3:12b",
+        _ => "gemma3:27b",
     }
 }
 

@@ -352,3 +352,62 @@ pub async fn generate_and_save_digest() -> Result<serde_json::Value, String> {
     save_digest(&digest)?;
     serde_json::to_value(&digest).map_err(|e| format!("Failed to serialize digest: {}", e))
 }
+
+#[tauri::command]
+pub async fn dismiss_reminder(id: String) -> Result<(), String> {
+    let path = dirs::home_dir()
+        .ok_or("No home dir")?
+        .join(".grove")
+        .join("reminders.json");
+
+    if !path.exists() {
+        return Err("No reminders file".to_string());
+    }
+
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut reminders: Vec<serde_json::Value> = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    let mut found = false;
+    for r in &mut reminders {
+        if r.get("id").and_then(|i| i.as_str()) == Some(&id) {
+            r.as_object_mut().unwrap().insert("dismissed".to_string(), serde_json::json!(true));
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        return Err(format!("Reminder {} not found", id));
+    }
+
+    let out = serde_json::to_string_pretty(&reminders).map_err(|e| e.to_string())?;
+    fs::write(&path, out).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn snooze_reminder(id: String, until: String) -> Result<(), String> {
+    let path = dirs::home_dir()
+        .ok_or("No home dir")?
+        .join(".grove")
+        .join("reminders.json");
+
+    if !path.exists() {
+        return Err("No reminders file".to_string());
+    }
+
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut reminders: Vec<serde_json::Value> = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    for r in &mut reminders {
+        if r.get("id").and_then(|i| i.as_str()) == Some(&id) {
+            r.as_object_mut().unwrap().insert("when".to_string(), serde_json::json!(until));
+            r.as_object_mut().unwrap().insert("dismissed".to_string(), serde_json::json!(false));
+            break;
+        }
+    }
+
+    let out = serde_json::to_string_pretty(&reminders).map_err(|e| e.to_string())?;
+    fs::write(&path, out).map_err(|e| e.to_string())?;
+    Ok(())
+}

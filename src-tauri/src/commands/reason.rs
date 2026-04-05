@@ -43,8 +43,64 @@ pub struct ReasonResponse {
 /// State managed by Tauri — holds the model router and conversation history
 pub struct RouterState(pub Arc<Mutex<ModelRouter>>);
 
-/// Conversation state — tracks multi-turn history
+/// Conversation state — tracks multi-turn history, persisted to disk.
 pub struct ConversationState(pub Arc<Mutex<Vec<ConversationTurn>>>);
+
+const CONVERSATION_FILE: &str = "conversation.json";
+const CONVERSATION_MAX_AGE_HOURS: i64 = 12;
+
+/// Load persisted conversation from disk, if recent enough.
+pub fn load_conversation() -> Vec<ConversationTurn> {
+    let path = match dirs::home_dir() {
+        Some(h) => h.join(".grove").join(CONVERSATION_FILE),
+        None => return Vec::new(),
+    };
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    #[derive(serde::Deserialize)]
+    struct Saved {
+        timestamp: String,
+        turns: Vec<ConversationTurn>,
+    }
+
+    let saved: Saved = match serde_json::from_str(&content) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+
+    // Check age — don't load stale conversations
+    if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&saved.timestamp) {
+        let age = Utc::now() - ts.with_timezone(&Utc);
+        if age.num_hours() > CONVERSATION_MAX_AGE_HOURS {
+            eprintln!("[grove] Conversation too old ({}h), starting fresh", age.num_hours());
+            return Vec::new();
+        }
+    }
+
+    eprintln!("[grove] Loaded {} conversation turns from disk", saved.turns.len());
+    saved.turns
+}
+
+/// Persist conversation turns to disk.
+pub fn save_conversation(turns: &[ConversationTurn]) {
+    let path = match dirs::home_dir() {
+        Some(h) => h.join(".grove").join(CONVERSATION_FILE),
+        None => return,
+    };
+
+    let payload = serde_json::json!({
+        "timestamp": Utc::now().to_rfc3339(),
+        "turns": turns,
+    });
+
+    if let Ok(content) = serde_json::to_string_pretty(&payload) {
+        std::fs::write(&path, content).ok();
+    }
+}
 
 #[tauri::command]
 pub async fn reason(
@@ -115,13 +171,12 @@ pub async fn reason(
         }
     }
 
-    // 2. Determine intent — use model-based classification when input is present
+    // 2. Determine intent (fast heuristic — no model call)
     let router = state.0.lock().await;
     let intent = match &user_input {
-        Some(input) => router.classify_intent(input).await,
+        Some(input) => router.classify_intent(input),
         None => ReasoningIntent::ComposeUI,
     };
-    drop(router);
 
     let intent_str = intent.label().to_string();
 
@@ -149,7 +204,6 @@ pub async fn reason(
     }
 
     // 4. Route to model
-    let router = state.0.lock().await;
     let output = router
         .route(&context, &intent)
         .await
@@ -334,7 +388,7 @@ pub async fn reason_stream(
     role_state: tauri::State<'_, crate::RoleState>,
     cycle_counter: tauri::State<'_, crate::CycleCounter>,
 ) -> Result<ReasonResponse, String> {
-    use tauri::Emitter;
+    use tauri::{Emitter, Manager};
 
     let start = Instant::now();
 
@@ -344,15 +398,22 @@ pub async fn reason_stream(
         None => None,
     };
 
+    // Emit stream-start immediately so frontend shows loading state
+    app_handle.emit("reason-stream-start", &serde_json::json!({})).ok();
+    app_handle.emit("reason-progress", "gathering context").ok();
+
     // Run on_reason hooks
     {
         let registry = plugin_state.0.lock().await;
         registry.run_hook("on_reason");
     }
 
-    // 1. Gather context
-    let mut context =
-        GroveContext::gather(user_input.clone()).map_err(|e| format!("Context error: {}", e))?;
+    // 1. Gather context — use warm cache when available, fall back to fresh gather
+    let context_cache = app_handle.state::<crate::ContextCache>();
+    let mut context = context_cache
+        .get_or_gather(user_input.clone())
+        .await
+        .map_err(|e| format!("Context error: {}", e))?;
 
     // Inject plugin data, digest, and reminders
     {
@@ -388,13 +449,26 @@ pub async fn reason_stream(
         }
     }
 
-    // 2. Classify intent
+    // Inject any pending source reads from previous cycle's read_source actions
+    if let Some(eph_state) = app_handle.try_state::<crate::EphemeralState>() {
+        if let Ok(mut eph) = eph_state.0.try_lock() {
+            if !eph.source_reads.is_empty() {
+                let reads = std::mem::take(&mut eph.source_reads);
+                context.plugin_data.push_str("\n--- SOURCE CODE (from read_source) ---\n");
+                for read in &reads {
+                    context.plugin_data.push_str(read);
+                    context.plugin_data.push('\n');
+                }
+            }
+        }
+    }
+
+    // 2. Classify intent (fast heuristic — no model call)
     let router = state.0.lock().await;
     let intent = match &user_input {
-        Some(input) => router.classify_intent(input).await,
+        Some(input) => router.classify_intent(input),
         None => ReasoningIntent::ComposeUI,
     };
-    drop(router);
 
     let intent_str = intent.label().to_string();
 
@@ -420,16 +494,19 @@ pub async fn reason_stream(
         context.conversation_history = Some(recent.join("\n"));
     }
 
-    // Emit "stream started" event
-    app_handle.emit("reason-stream-start", &serde_json::json!({})).ok();
-
     // 4. Route with streaming — emit each block as it arrives
+    app_handle.emit("reason-progress", "thinking").ok();
+
     let handle_clone = app_handle.clone();
+    let first_block = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let first_block_clone = first_block.clone();
     let block_emitter = move |block: Value| {
+        if !first_block_clone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            handle_clone.emit("reason-progress", "streaming").ok();
+        }
         handle_clone.emit("reason-block", &block).ok();
     };
 
-    let router = state.0.lock().await;
     let output = router
         .route_streaming(&context, &intent, block_emitter)
         .await
@@ -452,6 +529,8 @@ pub async fn reason_stream(
         let start_idx = conv.len() - 20;
         *conv = conv[start_idx..].to_vec();
     }
+    // Persist conversation to disk
+    save_conversation(&conv);
     drop(conv);
 
     // Record session in memory
@@ -558,6 +637,20 @@ pub async fn reason_stream(
         }
 
         let mut results = autonomous::execute_auto_actions(&approved);
+
+        // Store read_source results in ephemeral memory for next reasoning cycle
+        let source_results: Vec<String> = results.iter()
+            .filter(|r| r.starts_with("[source:"))
+            .cloned()
+            .collect();
+        if !source_results.is_empty() {
+            if let Some(eph_state) = app_handle.try_state::<crate::EphemeralState>() {
+                if let Ok(mut eph) = eph_state.0.try_lock() {
+                    eph.source_reads.extend(source_results);
+                }
+            }
+        }
+
         results.extend(blocked);
         results
     } else {
@@ -593,6 +686,17 @@ pub async fn reason_stream(
     // Emit completion event
     app_handle.emit("reason-stream-complete", &response).ok();
 
+    // Refresh context cache in background for next cycle
+    {
+        let cache = app_handle.state::<crate::ContextCache>().0.clone();
+        tokio::spawn(async move {
+            match GroveContext::gather(None) {
+                Ok(ctx) => { *cache.lock().await = Some(ctx); }
+                Err(_) => {}
+            }
+        });
+    }
+
     Ok(response)
 }
 
@@ -603,6 +707,41 @@ pub async fn clear_conversation(
 ) -> Result<(), String> {
     let mut conv = conversation.0.lock().await;
     conv.clear();
+    save_conversation(&conv);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn record_prompt_copied(
+    title: String,
+    prompt_preview: String,
+) -> Result<(), String> {
+    let path = dirs::home_dir()
+        .ok_or("No home dir")?
+        .join(".grove")
+        .join("prompt_history.json");
+
+    let mut history: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_default();
+
+    history.push(serde_json::json!({
+        "title": title,
+        "preview": prompt_preview,
+        "copied_at": Utc::now().to_rfc3339(),
+        "status": "copied",
+    }));
+
+    // Keep last 20
+    if history.len() > 20 {
+        history = history[history.len() - 20..].to_vec();
+    }
+
+    let json = serde_json::to_string_pretty(&history).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+
+    eprintln!("[grove] Prompt copied: {}", title);
     Ok(())
 }
 

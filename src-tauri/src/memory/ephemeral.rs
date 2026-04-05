@@ -20,6 +20,8 @@ pub struct EphemeralMemory {
     pub last_model_source: Option<String>,
     /// Observations from the heartbeat during this session.
     pub heartbeat_observations: Vec<String>,
+    /// Source code reads from read_source auto-actions (available next reasoning cycle).
+    pub source_reads: Vec<String>,
 }
 
 impl EphemeralMemory {

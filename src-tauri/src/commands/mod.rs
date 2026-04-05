@@ -16,3 +16,4 @@ pub mod vector;
 pub mod ventures;
 pub mod roles;
 pub mod watch;
+pub mod workspace;

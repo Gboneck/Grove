@@ -110,6 +110,100 @@
   animation: orb-reflect 6s ease-in-out infinite;
 }
 
+/* Orbital ring slow spin */
+.animate-spin-slow {
+  animation: spin 8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Particle orbits — offset phases for visual interest */
+@keyframes orbit-1 {
+  0% { transform: rotate(0deg) translateY(-12px) rotate(0deg); opacity: 0.7; }
+  50% { opacity: 0.3; }
+  100% { transform: rotate(360deg) translateY(-12px) rotate(-360deg); opacity: 0.7; }
+}
+@keyframes orbit-2 {
+  0% { transform: rotate(120deg) translateY(-10px) rotate(-120deg); opacity: 0.5; }
+  50% { opacity: 0.2; }
+  100% { transform: rotate(480deg) translateY(-10px) rotate(-480deg); opacity: 0.5; }
+}
+@keyframes orbit-3 {
+  0% { transform: rotate(240deg) translateY(-11px) rotate(-240deg); opacity: 0.4; }
+  50% { opacity: 0.15; }
+  100% { transform: rotate(600deg) translateY(-11px) rotate(-600deg); opacity: 0.4; }
+}
+
+.animate-orbit-1 { animation: orbit-1 3s linear infinite; }
+.animate-orbit-2 { animation: orbit-2 4s linear infinite; }
+.animate-orbit-3 { animation: orbit-3 5s linear infinite; }
+
+/* Block entrance variants by type */
+@keyframes block-enter-slide {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes block-enter-scale {
+  from { transform: scale(0.95) translateY(8px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+@keyframes block-enter-glow {
+  0% { transform: translateY(8px); opacity: 0; box-shadow: none; }
+  60% { transform: translateY(0); opacity: 1; box-shadow: 0 0 20px rgba(212, 168, 83, 0.15); }
+  100% { transform: translateY(0); opacity: 1; box-shadow: none; }
+}
+
+@keyframes block-enter-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Block dismissal */
+@keyframes block-dismiss {
+  from { transform: translateX(0) scale(1); opacity: 1; }
+  to { transform: translateX(30px) scale(0.95); opacity: 0; }
+}
+
+.animate-block-dismiss {
+  animation: block-dismiss 300ms ease-in forwards;
+  pointer-events: none;
+}
+
+/* Trend icon pop */
+@keyframes trend-pop {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-trend-pop {
+  animation: trend-pop 400ms ease-out;
+}
+
+/* Progress bar fill */
+@keyframes progress-fill {
+  from { width: 0%; }
+}
+
+.animate-progress-fill {
+  animation: progress-fill 1s ease-out;
+}
+
+/* Insight pulse on arrival */
+@keyframes insight-pulse {
+  0% { box-shadow: none; }
+  50% { box-shadow: 0 0 16px rgba(212, 168, 83, 0.12); }
+  100% { box-shadow: none; }
+}
+
+.animate-insight-pulse {
+  animation: insight-pulse 1.5s ease-out;
+}
+
 .animate-block-enter {
   animation: block-enter 500ms ease-out forwards;
 }

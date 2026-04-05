@@ -244,12 +244,6 @@ pub struct SearchResult {
 /// Synchronous search — tries Qdrant first, falls back to offline cosine search.
 /// Used by context gathering which runs in sync Tauri command context.
 pub fn search_sync(query: &str, limit: usize) -> Option<Vec<SearchResult>> {
-    // Try Qdrant via blocking HTTP
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(1))
-        .build()
-        .ok()?;
-
     let vector = embed_text(query);
     let body = serde_json::json!({
         "vector": vector,
@@ -257,24 +251,36 @@ pub fn search_sync(query: &str, limit: usize) -> Option<Vec<SearchResult>> {
         "with_payload": true,
         "score_threshold": 0.3,
     });
+    let url = format!(
+        "{}/collections/{}/points/search",
+        QDRANT_URL, COLLECTION_NAME
+    );
 
-    let resp = client
-        .post(format!(
-            "{}/collections/{}/points/search",
-            QDRANT_URL, COLLECTION_NAME
-        ))
-        .json(&body)
-        .send()
-        .ok();
-
-    if let Some(resp) = resp {
+    // Run blocking HTTP on a separate OS thread to avoid panicking tokio
+    // when reqwest::blocking drops its internal runtime in an async context.
+    let body_str = body.to_string();
+    let qdrant_result = std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(1))
+            .build()
+            .ok()?;
+        let resp = client
+            .post(&url)
+            .header("content-type", "application/json")
+            .body(body_str)
+            .send()
+            .ok()?;
         if resp.status().is_success() {
-            if let Ok(data) = resp.json::<serde_json::Value>() {
-                let results = parse_search_results(&data);
-                if !results.is_empty() {
-                    return Some(results);
-                }
-            }
+            resp.json::<serde_json::Value>().ok()
+        } else {
+            None
+        }
+    }).join().ok().flatten();
+
+    if let Some(data) = qdrant_result {
+        let results = parse_search_results(&data);
+        if !results.is_empty() {
+            return Some(results);
         }
     }
 

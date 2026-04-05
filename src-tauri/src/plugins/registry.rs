@@ -115,20 +115,25 @@ impl PluginRegistry {
                             .get("fallback")
                             .and_then(|f| f.as_str())
                             .unwrap_or("Data unavailable");
-                        match reqwest::blocking::Client::builder()
-                            .timeout(std::time::Duration::from_secs(5))
-                            .build()
-                            .and_then(|c| c.get(url).send())
-                        {
-                            Ok(resp) if resp.status().is_success() => {
-                                if let Ok(body) = resp.text() {
-                                    let trimmed = body.trim();
-                                    if !trimmed.is_empty() {
-                                        context_parts.push(format!(
-                                            "--- {} ({}) ---\n{}",
-                                            ds.label, id, trimmed
-                                        ));
-                                    }
+                        // Run blocking HTTP on a separate OS thread to avoid
+                        // panicking tokio when reqwest::blocking drops its runtime.
+                        let url_owned = url.to_string();
+                        let http_result = std::thread::spawn(move || {
+                            reqwest::blocking::Client::builder()
+                                .timeout(std::time::Duration::from_secs(5))
+                                .build()
+                                .and_then(|c| c.get(&url_owned).send())
+                                .ok()
+                                .and_then(|r| if r.status().is_success() { r.text().ok() } else { None })
+                        }).join().ok().flatten();
+                        match http_result {
+                            Some(body) => {
+                                let trimmed = body.trim();
+                                if !trimmed.is_empty() {
+                                    context_parts.push(format!(
+                                        "--- {} ({}) ---\n{}",
+                                        ds.label, id, trimmed
+                                    ));
                                 }
                             }
                             _ => {

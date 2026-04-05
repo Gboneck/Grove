@@ -10,20 +10,32 @@ const iconMap: Record<string, string> = {
   idea: "◆",
 };
 
-const borderColors: Record<string, string> = {
-  alert: "border-l-grove-status-red",
-  opportunity: "border-l-grove-status-green",
-  warning: "border-l-grove-status-yellow",
-  idea: "border-l-grove-accent",
+const bgTints: Record<string, string> = {
+  alert: "bg-grove-status-red/[0.04]",
+  opportunity: "bg-grove-status-green/[0.04]",
+  warning: "bg-grove-status-yellow/[0.04]",
+  idea: "bg-grove-accent/[0.04]",
+};
+
+const borderGradients: Record<string, string> = {
+  alert: "from-grove-status-red to-grove-status-red/20",
+  opportunity: "from-grove-status-green to-grove-status-green/20",
+  warning: "from-grove-status-yellow to-grove-status-yellow/20",
+  idea: "from-grove-accent to-[#c084fc]/40",
 };
 
 export default function InsightBlock({ icon, message }: InsightBlockProps) {
+  const gradient = borderGradients[icon] || borderGradients.idea;
+  const tint = bgTints[icon] || bgTints.idea;
+
   return (
-    <div
-      className={`bg-grove-surface border border-grove-border ${borderColors[icon] || borderColors.idea} border-l-2 rounded-lg p-4 flex items-start gap-3`}
-    >
-      <span className="text-lg mt-0.5">{iconMap[icon] || "◆"}</span>
-      <p className="text-grove-text-primary leading-relaxed">{message}</p>
+    <div className={`relative rounded-lg overflow-hidden ${tint}`}>
+      {/* Gradient left border */}
+      <div className={`absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b ${gradient}`} />
+      <div className="border border-grove-border/50 border-l-0 rounded-lg p-4 flex items-start gap-3 ml-0.5">
+        <span className="text-lg mt-0.5 flex-shrink-0">{iconMap[icon] || "◆"}</span>
+        <p className="text-grove-text-primary leading-relaxed text-sm">{message}</p>
+      </div>
     </div>
   );
 }
